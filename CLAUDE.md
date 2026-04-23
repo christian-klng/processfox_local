@@ -1,0 +1,230 @@
+# CLAUDE.md — Arbeits-Anweisungen für Claude Code
+
+Dieses Dokument richtet sich an Claude Code (und an alle anderen LLM-gestützten Codier-Assistenten), die an ProcessFox mitarbeiten. Es fasst Projekt-Kontext, Tech-Stack, Code-Stil-Regeln und Architektur-Prinzipien so zusammen, dass Entscheidungen konsistent mit der Produkt-Vision bleiben.
+
+**Pflicht-Lektüre vor jedem größeren Task:**
+- [`CONCEPT.md`](CONCEPT.md) — vollständige Produkt-Vision und Architektur
+- [`docs/architecture.md`](docs/architecture.md) — technische Architekturskizze
+- [`docs/roadmap.md`](docs/roadmap.md) — aktuelle Phase
+- Die relevante `docs/skills/<skill>.md`, wenn du an einem Skill arbeitest
+
+## 1. Projekt-Kurzprofil
+
+- **Produkt:** ProcessFox — Desktop-App für lokale KI-Agenten, Zielgruppe Einsteiger (kleine Unternehmen, NGOs).
+- **Framework:** Tauri v2.
+- **Frontend:** React 18 + Vite + TypeScript + Tailwind + shadcn/ui.
+- **Backend:** Rust (pure Rust, keine Python-Abhängigkeit).
+- **LLM-Runtime:** Rust-nativ (candle oder mistral.rs — finale Wahl in Phase 2 nach Benchmark).
+- **Distribution:** GitHub Releases, Auto-Updater via Tauri Updater, GitHub Actions.
+
+## 2. Goldene Regeln
+
+1. **Einsteiger-Fokus schlägt Feature-Fülle.** Wenn eine Entscheidung zwischen "mehr können" und "einfacher bedienen" steht, gewinnt immer einfacher. Bei Zweifeln: zurück zu `CONCEPT.md` §3 "Produkt-Prinzipien".
+2. **Agent > Thread.** Es gibt keine Chat-History-Sidebar. Alles passiert in benannten Agenten. Wer eine Thread-UI vorschlägt, liegt falsch.
+3. **Skills sind atomar.** Ein Skill tut eine Sache und kombiniert dafür Tools. Keine Meta-Skills, keine Workflow-Skills.
+4. **Ordner-Sandbox ist nicht verhandelbar.** Jeder Tool-Call MUSS im Backend prüfen, dass der Pfad im Agent-Ordner liegt. Kein Verlass auf LLM-Disziplin.
+5. **HITL ist Default für Schreibaktionen.** Ausnahme nur, wenn der Skill bewusst auf "ohne Rückfrage" konfiguriert ist.
+6. **Keine Python-Abhängigkeit in v1.** Alles in Rust. Wenn du einen Python-Subprozess vorschlägst, stimmt etwas nicht.
+7. **Lokal zuerst.** Cloud-APIs sind Optionen, nicht die Haupt-Codepfad.
+8. **Kein User-Script in der Sandbox in v1.** Die Sandbox-Infrastruktur wird gebaut, aber nur für eingebaute Skills.
+
+## 3. Code-Stil-Regeln
+
+### Rust
+- Rust 2021 Edition, `cargo fmt` vor jedem Commit, `cargo clippy -- -D warnings` muss grün sein.
+- **Fehler-Handling:** `thiserror` für Library-Crates, `anyhow` nur in Tauri-Commands. Keine `unwrap()` in Production-Code — immer `?` oder sinnvolles Fallback.
+- **Async:** `tokio` (Tauri bringt es mit). Blockierende Operationen (Datei-IO, LLM-Inferenz) immer in `spawn_blocking` oder eigenem Thread.
+- **Module-Layout:** Ein Tauri-Command pro Feature-Datei, gruppiert unter `src-tauri/src/commands/`.
+- **Sicherheit:** Jeder File-Path, der aus dem Frontend kommt, wird gegen den Agent-Ordner normalisiert und geprüft. Nutze eine zentrale Funktion `ensure_in_agent_folder(agent_id, path) -> Result<PathBuf>`.
+- **Serialisierung:** `serde` mit expliziten Feldnamen (`#[serde(rename_all = "camelCase")]` zur TypeScript-Seite hin).
+
+### TypeScript / React
+- TypeScript strict-mode an.
+- Funktionale Komponenten, Hooks, keine Klassen-Komponenten.
+- Datenfluss: **Zustand möglichst im Rust-Backend.** Frontend holt per `invoke()` und cached lokal via `react-query` oder simplem State.
+- **Keine State-Management-Library** wie Redux/Zustand in v1 nötig — Props + Context reichen bei unserer Größe.
+- **Styling:** Tailwind Utility-Klassen, keine Inline-Styles, keine separaten CSS-Dateien außer `globals.css`.
+- **Datei-Organisation:** `src/components/`, `src/views/`, `src/hooks/`, `src/lib/` (für Rust-Bridge-Wrapper), `src/types/` (für geteilte TS-Typen).
+- **Kommentare:** Englisch im Code (Kommentare, Variablen-Namen). UI-Strings und Doku-Markdown auf Deutsch (siehe §8).
+
+## 4. Verzeichnis-Layout (Soll-Struktur)
+
+```
+processfox/
+├── README.md
+├── CONCEPT.md
+├── CLAUDE.md                       # dieses Dokument
+├── LICENSE
+├── .gitignore
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+├── tailwind.config.ts
+├── index.html
+├── src/                            # Frontend (React + TS)
+│   ├── main.tsx
+│   ├── App.tsx
+│   ├── components/
+│   │   ├── agent/
+│   │   ├── chat/
+│   │   ├── filetree/
+│   │   ├── preview/
+│   │   └── ui/                     # shadcn-Bausteine
+│   ├── views/
+│   │   ├── Main.tsx
+│   │   └── Settings.tsx
+│   ├── hooks/
+│   ├── lib/
+│   │   └── tauri.ts                # typed invoke() wrappers
+│   └── types/
+├── src-tauri/                      # Backend (Rust)
+│   ├── Cargo.toml
+│   ├── tauri.conf.json
+│   ├── build.rs
+│   └── src/
+│       ├── main.rs
+│       ├── commands/
+│       │   ├── agent.rs
+│       │   ├── file.rs
+│       │   ├── llm.rs
+│       │   ├── model.rs
+│       │   └── skill.rs
+│       ├── core/
+│       │   ├── agent.rs            # Agent-Datenmodell, Persistenz
+│       │   ├── skill.rs            # Skill-Loading, Frontmatter
+│       │   ├── tool.rs             # Tool-Registry und -Ausführung
+│       │   ├── react_loop.rs       # ReAct-Orchestrierung
+│       │   ├── sandbox.rs          # Sandbox-Regeln (Path-Checks, etc.)
+│       │   └── storage.rs          # App-Support-Ordner-Management
+│       ├── runtime/
+│       │   └── llm/                # LLM-Runtime-Abstraktion
+│       ├── tools/                  # einzelne Tool-Implementierungen
+│       │   ├── mod.rs
+│       │   ├── list_folder.rs
+│       │   ├── read_file.rs
+│       │   ├── grep_in_files.rs
+│       │   ├── xlsx.rs
+│       │   ├── docx.rs
+│       │   └── ...
+│       └── skills_builtin/         # eingebaute Skills als Ressourcen
+│           ├── folder-search/
+│           │   └── SKILL.md
+│           └── ...
+├── docs/
+│   ├── architecture.md
+│   ├── roadmap.md
+│   └── skills/
+│       ├── SKILL_TEMPLATE.md
+│       └── <skill-name>.md
+└── .github/
+    └── workflows/
+        └── release.yml
+```
+
+## 5. Wichtige Schnittstellen-Konventionen
+
+### Tauri Commands (Rust → Frontend)
+
+- Jeder Command nimmt eine `AppState` (Arc<Mutex<…>>) entgegen, liest nie globalen Zustand direkt.
+- Fehler werden als `Result<T, CommandError>` zurückgegeben, wobei `CommandError` serialisierbar ist und einen `code`, `message`, und optional `details` enthält.
+- Lange Operationen (Modell-Download, ReAct-Loop) laufen via Tauri-Events (`app.emit`), nicht als Return-Value.
+- Command-Namen in `snake_case` in Rust, TypeScript-Seite wrappt zu `camelCase`.
+
+### Frontend-Bridge (`src/lib/tauri.ts`)
+
+- Zentrale Typ-sichere Wrapper für alle Commands.
+- Event-Listener für Live-Updates (Tool-Call-Status, Download-Progress) als Custom Hooks.
+
+### LLM-Runtime-Abstraktion
+
+- Trait `LlmProvider` mit async `generate(messages, tools, params) -> Stream<Event>`.
+- Implementierungen: `LocalGgufProvider`, `AnthropicProvider`, `OpenAiProvider`, `OpenRouterProvider`.
+- Einheitliches Event-Format: `TextDelta`, `ToolCall`, `Finish { reason }`.
+
+### Tool-Registry
+
+- Tools sind in einer zentralen Registry registriert (`HashMap<String, Arc<dyn Tool>>`).
+- `trait Tool { fn name() -> &str; fn schema() -> JsonSchema; async fn execute(input, context) -> Result<Output>; }`.
+- `context` enthält Agent-ID, Agent-Ordner-Pfad, App-Handle für Events.
+
+### Skill-Loading
+
+- Beim App-Start werden `src-tauri/skills_builtin/` und `<app-support>/skills/user/` gescannt.
+- Frontmatter wird via `serde_yaml` oder `gray_matter` geparsed.
+- Geladen in ein `SkillRegistry`, von dort kann der Agent sie abrufen.
+
+## 6. Sicherheits-Pattern
+
+```rust
+// Pseudo-Code — in jedem File-Tool anzuwenden:
+pub async fn execute(input: ToolInput, ctx: ToolContext) -> Result<ToolOutput> {
+    let requested_path = PathBuf::from(&input.path);
+    let safe_path = ensure_in_agent_folder(&ctx.agent_folder, &requested_path)?;
+    // ... weitermachen mit safe_path
+}
+
+fn ensure_in_agent_folder(agent_folder: &Path, requested: &Path) -> Result<PathBuf> {
+    let absolute = if requested.is_absolute() {
+        requested.to_path_buf()
+    } else {
+        agent_folder.join(requested)
+    };
+    let canonical = absolute.canonicalize().map_err(|_| Error::PathInvalid)?;
+    if !canonical.starts_with(agent_folder.canonicalize()?) {
+        return Err(Error::PathOutsideAgentFolder);
+    }
+    Ok(canonical)
+}
+```
+
+Zusätzlich: Symlink-Escape-Prävention durch `canonicalize`; Denylist für spezielle Dateien (`.DS_Store`, `Thumbs.db` ignorieren aber nicht manipulieren); maximale Dateigröße-Limits für Lese-Tools.
+
+## 7. Test-Strategie
+
+- **Rust:** `cargo test` für Unit-Tests pro Tool. Integration-Tests für ReAct-Loop mit Mock-LLM.
+- **Frontend:** `vitest` für Hooks und Utility-Funktionen. Storybook optional für Komponenten in späteren Phasen.
+- **E2E:** Playwright/WebDriver-basierte Tests erst ab Phase 5; in früheren Phasen manuelle Tests reichen.
+- **Tool-Calling mit echten Modellen:** Eigenes Test-Script, das pro Skill 3–5 Referenz-Prompts durchjagt und Pass/Fail loggt. Wird in Phase 3/4 aufgebaut.
+
+## 8. Sprach-Konvention
+
+- **Code:** Englisch (Variablen, Funktionsnamen, Kommentare, Git-Commit-Messages).
+- **UI-Strings:** Deutsch (in v1 fest verdrahtet, keine i18n-Library nötig — aber so strukturiert, dass i18n später nachrüstbar ist; z. B. ein `src/lib/strings.ts` mit Keys).
+- **Dokumentation im Repo:** Deutsch (die CONCEPT.md, dieses Dokument, docs/* — der Owner ist deutschsprachig und Beta-Tester ebenfalls).
+- **SKILL.md-Bodies:** Englisch. Standard-Hinweis im Prompt: "Respond in the user's language."
+
+## 9. Commit- und PR-Konventionen
+
+- Conventional Commits: `feat:`, `fix:`, `chore:`, `docs:`, `refactor:`, `test:`, `build:`.
+- PR-Beschreibungen enthalten: Was ändert sich, warum, welche Tests laufen.
+- Feature-Branches: `feat/<phase>-<kurz>` (z. B. `feat/3-folder-search-skill`).
+- Stable-Branch: `main`. Alles geht über PR. Direct-Push auf `main` ist verboten.
+
+## 10. Wenn du unsicher bist
+
+- **Architektur-Frage:** Lies zuerst `CONCEPT.md` §4 (Taxonomie) und §6 (Verhalten). Wenn es immer noch unklar ist, markiere die Stelle mit `// TODO(decision):` und frage den Owner explizit.
+- **UX-Frage:** Schau zu Obsidian und Claude Cowork als Referenz. Bei echter Unsicherheit: Minimal-Variante implementieren und Feedback einholen, statt lange Diskussion.
+- **Performance-Frage:** Erst messen, dann optimieren. Profile mit `cargo flamegraph` oder Chrome DevTools, bevor du umbaust.
+- **Fehlende Abhängigkeit:** Neue Crates/NPM-Pakete vor dem Hinzufügen begründen (Issue / PR-Description). Wir halten die Abhängigkeiten bewusst schlank.
+
+## 11. Was NICHT zu tun ist
+
+- Keine eigene State-Library einführen, solange Context + `useState` ausreichen.
+- Keine Mikroservice-Architektur oder externe Services.
+- Keine KI-generierten Skills in v1 (Skill-Erstellungs-UI erlaubt nur formularbasierte Anlage, kein "Agent schreibt seinen eigenen Skill").
+- Keine impliziten Berechtigungen — jede Datei-Operation ist explizit gesandboxt.
+- Keine Chat-History-Sidebar. Ernsthaft.
+- Keine Einführung einer Skript-Sprache für User in v1.
+
+## 12. Release-Prozess (Kurz)
+
+1. Alle Akzeptanzkriterien der aktuellen Phase (`docs/roadmap.md`) sind erfüllt.
+2. Version in `package.json` und `src-tauri/tauri.conf.json` bumpen.
+3. Tag setzen (`git tag v0.x.y`) und pushen.
+4. GitHub Actions `release.yml` baut Mac / Windows / Linux und pusht Artefakte an GitHub Release.
+5. Release-Notes verfassen (was ist neu, was ist bekannt fehlerhaft).
+6. Auto-Updater holt sich die neue Version bei den Nutzer:innen.
+
+---
+
+Wenn du dieses Dokument liest und etwas unvollständig oder widersprüchlich findest: bitte melde es und aktualisiere es im selben PR, in dem du die neue Arbeit hinzufügst. Dieses Dokument lebt mit dem Projekt.

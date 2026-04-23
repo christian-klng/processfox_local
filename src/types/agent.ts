@@ -1,0 +1,38 @@
+export type ModelRef =
+  | { type: "local"; id: string }
+  | { type: "cloud"; provider: string; id: string };
+
+export interface SkillSetting {
+  hitl?: boolean;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  icon: string;
+  folder: string | null;
+  systemPrompt: string;
+  model: ModelRef | null;
+  skills: string[];
+  skillSettings: Record<string, SkillSetting>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentDraft {
+  name: string;
+  icon?: string;
+  folder?: string;
+  systemPrompt?: string;
+  model?: ModelRef;
+  skills?: string[];
+}
+
+export interface AgentUpdate {
+  name?: string;
+  icon?: string;
+  folder?: string;
+  systemPrompt?: string;
+  model?: ModelRef;
+  skills?: string[];
+}

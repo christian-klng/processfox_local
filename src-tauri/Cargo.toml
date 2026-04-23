@@ -1,0 +1,35 @@
+[package]
+name = "processfox"
+version = "0.1.0"
+description = "ProcessFox — Lokale KI-Agenten für Einsteiger"
+authors = ["ProcessFox"]
+edition = "2021"
+
+[lib]
+name = "processfox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "1"
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+directories = "5"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
