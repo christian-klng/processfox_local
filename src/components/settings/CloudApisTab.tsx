@@ -178,6 +178,11 @@ function ProviderCard({
       );
       onSettingsChange(updated);
     }
+    // A validated cloud provider also satisfies the first-run requirement.
+    if (settings && !settings.firstRunDone) {
+      const next = await settingsApi.setFirstRunDone();
+      onSettingsChange(next);
+    }
   }
 
   async function saveKey() {

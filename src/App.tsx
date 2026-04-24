@@ -26,7 +26,9 @@ function AppShell() {
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [selectedFile, setSelectedFile] = useState<SelectedFile>(null);
 
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsState, setSettingsState] = useState<
+    { open: false } | { open: true; tab: "models" | "cloud" | "appearance" | "about" }
+  >({ open: false });
   const [agentEditor, setAgentEditor] = useState<
     { mode: "create" | "edit" } | null
   >(null);
@@ -52,8 +54,13 @@ function AppShell() {
 
   useEffect(() => {
     Promise.all([refreshAgents(), refreshSettings()])
-      .then(([list]) => {
+      .then(([list, s]) => {
         if (list.length > 0) setActiveAgent(list[0]);
+        // First-run onboarding: open Settings on the Models tab so the user
+        // can either download a local model or configure a cloud provider.
+        if (!s.firstRunDone) {
+          setSettingsState({ open: true, tab: "models" });
+        }
       })
       .catch((e) => console.error("initial load failed", e));
   }, [refreshAgents, refreshSettings]);
@@ -76,7 +83,7 @@ function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveModel, settingsOpen]);
+  }, [effectiveModel, settingsState.open]);
 
   const handleSelectAgent = useCallback((agent: Agent) => {
     setActiveAgent(agent);
@@ -107,9 +114,12 @@ function AppShell() {
 
   const handleClosePreview = useCallback(() => setSelectedFile(null), []);
 
-  const handleOpenSettings = useCallback(() => setSettingsOpen(true), []);
+  const handleOpenSettings = useCallback(
+    () => setSettingsState({ open: true, tab: "cloud" }),
+    [],
+  );
   const handleCloseSettings = useCallback(() => {
-    setSettingsOpen(false);
+    setSettingsState({ open: false });
     // Re-fetch settings on close in case the user changed a default.
     refreshSettings().catch(console.error);
   }, [refreshSettings]);
@@ -177,7 +187,8 @@ function AppShell() {
       />
 
       <SettingsDialog
-        open={settingsOpen}
+        open={settingsState.open}
+        defaultTab={settingsState.open ? settingsState.tab : undefined}
         onClose={handleCloseSettings}
         onSettingsChange={handleSettingsChange}
       />

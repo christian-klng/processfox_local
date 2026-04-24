@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "id": "llama-3_2-3b-q4",
+      "title": "Llama 3.2 3B Instruct",
+      "vendor": "Meta",
+      "quant": "Q4_K_M",
+      "sizeBytes": 2019377952,
+      "minRamGb": 6,
+      "hfUrl": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+      "description": "Kompakt, schnell, gut für deutschsprachige Alltagsaufgaben auf schwächerer Hardware."
+    },
+    {
+      "id": "qwen-2_5-7b-q4",
+      "title": "Qwen 2.5 7B Instruct",
+      "vendor": "Alibaba",
+      "quant": "Q4_K_M",
+      "sizeBytes": 4683072672,
+      "minRamGb": 12,
+      "hfUrl": "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "filename": "Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+      "description": "Ausgewogen, sehr gute Tool-Calling-Qualität, empfehlenswert für die meisten Aufgaben."
+    },
+    {
+      "id": "gemma-2-9b-q4",
+      "title": "Gemma 2 9B Instruct",
+      "vendor": "Google",
+      "quant": "Q4_K_M",
+      "sizeBytes": 5761057952,
+      "minRamGb": 16,
+      "hfUrl": "https://huggingface.co/bartowski/gemma-2-9b-it-GGUF/resolve/main/gemma-2-9b-it-Q4_K_M.gguf",
+      "filename": "gemma-2-9b-it-Q4_K_M.gguf",
+      "description": "Hohe deutschsprachige Qualität, braucht aber mehr Arbeitsspeicher."
+    }
+  ]
+}

@@ -3,6 +3,7 @@ use std::sync::{Arc, OnceLock};
 use crate::core::agent::AgentRepo;
 use crate::core::chat::{ChatRepo, ChatRunner};
 use crate::core::llm::ProviderRegistry;
+use crate::core::models::{DownloadRunner, InstalledScanner, ModelCatalog};
 use crate::core::settings::SettingsStore;
 use crate::core::storage::AppPaths;
 
@@ -12,17 +13,21 @@ use crate::core::storage::AppPaths;
 pub struct AppState {
     pub paths: AppPaths,
     pub providers: ProviderRegistry,
+    pub catalog: ModelCatalog,
     /// Initialized lazily on first chat run, because the `ChatRunner` needs
     /// an `AppHandle` that only exists after Tauri has finished `setup`.
-    runner: Arc<OnceLock<ChatRunner>>,
+    chat_runner: Arc<OnceLock<ChatRunner>>,
+    download_runner: Arc<OnceLock<DownloadRunner>>,
 }
 
 impl AppState {
-    pub fn new(paths: AppPaths, providers: ProviderRegistry) -> Self {
+    pub fn new(paths: AppPaths, providers: ProviderRegistry, catalog: ModelCatalog) -> Self {
         Self {
             paths,
             providers,
-            runner: Arc::new(OnceLock::new()),
+            catalog,
+            chat_runner: Arc::new(OnceLock::new()),
+            download_runner: Arc::new(OnceLock::new()),
         }
     }
 
@@ -38,9 +43,25 @@ impl AppState {
         SettingsStore::new(&self.paths)
     }
 
+    pub fn installed_scanner(&self) -> InstalledScanner {
+        InstalledScanner::new(&self.paths)
+    }
+
     pub fn chat_runner(&self, app: &tauri::AppHandle) -> ChatRunner {
-        self.runner
+        self.chat_runner
             .get_or_init(|| ChatRunner::new(app.clone(), self.chat_repo(), self.providers.clone()))
             .clone()
+    }
+
+    pub fn download_runner(
+        &self,
+        app: &tauri::AppHandle,
+    ) -> crate::core::error::CoreResult<DownloadRunner> {
+        if let Some(runner) = self.download_runner.get() {
+            return Ok(runner.clone());
+        }
+        let runner = DownloadRunner::new(app.clone(), self.paths.clone())?;
+        let _ = self.download_runner.set(runner.clone());
+        Ok(runner)
     }
 }

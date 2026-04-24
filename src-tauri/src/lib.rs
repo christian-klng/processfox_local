@@ -11,6 +11,7 @@ use crate::core::llm::{
     anthropic::AnthropicProvider, openai::OpenAiProvider, openrouter::OpenRouterProvider,
     ProviderRegistry,
 };
+use crate::core::models::ModelCatalog;
 use crate::core::storage::AppPaths;
 use crate::state::AppState;
 
@@ -36,7 +37,10 @@ pub fn run() {
             registry.register(Arc::new(OpenAiProvider::new()?));
             registry.register(Arc::new(OpenRouterProvider::new()?));
 
-            app.manage(AppState::new(paths, registry));
+            let catalog = ModelCatalog::embedded()?;
+            tracing::info!(models = catalog.models.len(), "model catalog loaded");
+
+            app.manage(AppState::new(paths, registry, catalog));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -58,6 +62,13 @@ pub fn run() {
             commands::chat::list_messages,
             commands::chat::send_message,
             commands::chat::cancel_run,
+            commands::models::list_catalog,
+            commands::models::list_installed_models,
+            commands::models::get_hardware_info,
+            commands::models::download_from_catalog,
+            commands::models::download_from_url,
+            commands::models::cancel_download,
+            commands::models::delete_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

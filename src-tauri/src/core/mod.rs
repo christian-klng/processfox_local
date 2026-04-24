@@ -1,7 +1,9 @@
 pub mod agent;
 pub mod chat;
 pub mod error;
+pub mod hardware;
 pub mod llm;
+pub mod models;
 pub mod sandbox;
 pub mod secrets;
 pub mod settings;

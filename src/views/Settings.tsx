@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { CloudApisTab } from "@/components/settings/CloudApisTab";
+import { ModelsTab } from "@/components/settings/ModelsTab";
 import { useTheme, type Theme } from "@/components/theme-provider";
 import {
   Dialog,
@@ -14,6 +15,7 @@ import type { Settings } from "@/types/settings";
 
 type Props = {
   open: boolean;
+  defaultTab?: "models" | "cloud" | "appearance" | "about";
   onClose: () => void;
   onSettingsChange?: (s: Settings) => void;
 };
@@ -24,7 +26,12 @@ const THEME_OPTIONS: { value: Theme; label: string }[] = [
   { value: "dark", label: "Dunkel" },
 ];
 
-export function SettingsDialog({ open, onClose, onSettingsChange }: Props) {
+export function SettingsDialog({
+  open,
+  defaultTab = "cloud",
+  onClose,
+  onSettingsChange,
+}: Props) {
   const { theme, setTheme } = useTheme();
   const [settings, setSettings] = useState<Settings | null>(null);
 
@@ -40,12 +47,12 @@ export function SettingsDialog({ open, onClose, onSettingsChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-[680px]">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
         <DialogHeader>
           <DialogTitle>Einstellungen</DialogTitle>
         </DialogHeader>
 
-        <Tabs defaultValue="cloud">
+        <Tabs defaultValue={defaultTab}>
           <TabsList className="w-full justify-start">
             <TabsTrigger value="models">Modelle</TabsTrigger>
             <TabsTrigger value="cloud">Cloud-APIs</TabsTrigger>
@@ -53,11 +60,11 @@ export function SettingsDialog({ open, onClose, onSettingsChange }: Props) {
             <TabsTrigger value="about">Über</TabsTrigger>
           </TabsList>
 
-          <TabsContent
-            value="models"
-            className="py-4 text-xs text-muted-foreground"
-          >
-            Lokale Modelle und Download-Verwaltung folgen in Etappe B.
+          <TabsContent value="models">
+            <ModelsTab
+              settings={settings}
+              onSettingsChange={handleSettingsChange}
+            />
           </TabsContent>
 
           <TabsContent value="cloud">

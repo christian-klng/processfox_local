@@ -4,6 +4,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Agent, AgentDraft, AgentUpdate } from "@/types/agent";
 import type { ChatMessage, RunEvent, RunStarted } from "@/types/chat";
 import type { FileEntry } from "@/types/file";
+import type {
+  CatalogEntry,
+  DownloadEvent,
+  HardwareInfo,
+  InstalledModel,
+} from "@/types/models";
 import type { Settings } from "@/types/settings";
 
 export const agentApi = {
@@ -45,6 +51,37 @@ export const secretsApi = {
   validateApiKey: (provider: string) =>
     invoke<ValidationResult>("validate_api_key", { provider }),
 };
+
+export const modelsApi = {
+  listCatalog: () => invoke<CatalogEntry[]>("list_catalog"),
+  listInstalled: () => invoke<InstalledModel[]>("list_installed_models"),
+  getHardwareInfo: () => invoke<HardwareInfo>("get_hardware_info"),
+  downloadFromCatalog: (catalogId: string) =>
+    invoke<void>("download_from_catalog", { catalogId }),
+  downloadFromUrl: (downloadId: string, url: string, filename: string) =>
+    invoke<void>("download_from_url", { downloadId, url, filename }),
+  cancelDownload: (downloadId: string) =>
+    invoke<void>("cancel_download", { downloadId }),
+  deleteModel: (filename: string) =>
+    invoke<void>("delete_model", { filename }),
+  subscribeDownload: (
+    downloadId: string,
+    handler: (event: DownloadEvent) => void,
+  ): Promise<UnlistenFn> =>
+    listen<DownloadEvent>(
+      `model:download:${sanitizeEventSegment(downloadId)}`,
+      (evt) => handler(evt.payload),
+    ),
+};
+
+/**
+ * Tauri event names only allow alphanumeric, `-`, `/`, `:`, `_`. Mirror the
+ * backend's sanitizer so catalog IDs or custom download IDs with other
+ * characters can still be used as logical identifiers.
+ */
+function sanitizeEventSegment(segment: string): string {
+  return segment.replace(/[^a-zA-Z0-9\-\/:_]/g, "_");
+}
 
 export const chatApi = {
   listMessages: (agentId: string) =>
