@@ -1,3 +1,9 @@
+# Optimize dependencies even in dev builds. mistralrs and its math crates
+# are ~10× slower in debug mode, which makes local inference unusable. Our
+# own crate stays at opt-level 0 so iteration time remains fast.
+[profile.dev.package."*"]
+opt-level = 3
+
 [package]
 name = "processfox"
 version = "0.1.0"
@@ -54,3 +60,10 @@ keyring = { version = "3", features = [
 ] }
 
 sysinfo = "0.33"
+
+# Local GGUF runtime. Metal is intentionally off for now — it requires the
+# `MetalToolchain` Xcode component whose download is currently failing on
+# Apple's side for some Xcode builds. Re-enable by adding
+# `features = ["metal"]` once `sudo xcodebuild -downloadComponent MetalToolchain`
+# succeeds; expect ~3–5× faster local inference on Apple Silicon.
+mistralrs = { version = "0.8", default-features = false }

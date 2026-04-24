@@ -115,16 +115,26 @@ export function ModelsTab({ settings, onSettingsChange }: Props) {
           total: event.total,
         });
         break;
-      case "finished":
+      case "finished": {
         unsubscribe(id);
         setDownload(id, { status: "idle" });
         await refresh();
+        const parts = event.path.split(/[/\\]/);
+        const filename = parts[parts.length - 1] ?? "";
+        // If no default provider is set yet, wire this freshly downloaded
+        // model up as the app-wide default so the chat is immediately usable.
+        if (settings && !settings.defaultProvider && filename) {
+          await settingsApi.setDefaultProvider("local");
+          const withModel = await settingsApi.setDefaultModel("local", filename);
+          onSettingsChange(withModel);
+        }
         // Mark first-run as done on first successful download.
         if (settings && !settings.firstRunDone) {
           const next = await settingsApi.setFirstRunDone();
           onSettingsChange(next);
         }
         break;
+      }
       case "cancelled":
         unsubscribe(id);
         setDownload(id, { status: "idle" });

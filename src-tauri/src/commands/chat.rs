@@ -24,7 +24,8 @@ pub async fn send_message(
 ) -> Result<RunStarted, CommandError> {
     let agent = state.agent_repo().get(&agent_id)?;
 
-    if !crate::core::secrets::has_api_key(&provider)? {
+    // Local GGUF inference has no API key concept; every other provider does.
+    if provider != "local" && !crate::core::secrets::has_api_key(&provider)? {
         return Err(CoreError::MissingApiKey(provider).into());
     }
 

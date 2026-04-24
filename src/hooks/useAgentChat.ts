@@ -20,8 +20,8 @@ export function resolveAgentModel(
     return { provider: agent.model.provider, modelId: agent.model.id };
   }
   if (agent.model && agent.model.type === "local") {
-    // Local provider comes in Etappe C.
-    return null;
+    if (agent.model.id.trim().length === 0) return null;
+    return { provider: "local", modelId: agent.model.id };
   }
   const provider = settings?.defaultProvider;
   if (!provider) return null;

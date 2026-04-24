@@ -9,6 +9,7 @@ pub type ProviderId = &'static str;
 pub const ANTHROPIC: ProviderId = "anthropic";
 pub const OPENAI: ProviderId = "openai";
 pub const OPENROUTER: ProviderId = "openrouter";
+pub const LOCAL: ProviderId = "local";
 
 /// Holds the set of concrete `LlmProvider` implementations available in the app.
 /// Cheap to clone — all providers live behind `Arc`.

@@ -5,8 +5,9 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { resolveAgentModel, useAgentChat } from "@/hooks/useAgentChat";
 import { Main } from "@/views/Main";
 import { SettingsDialog } from "@/views/Settings";
-import { agentApi, secretsApi, settingsApi } from "@/lib/tauri";
+import { agentApi, modelsApi, secretsApi, settingsApi } from "@/lib/tauri";
 import type { Agent } from "@/types/agent";
+import type { InstalledModel } from "@/types/models";
 import type { Settings } from "@/types/settings";
 
 type SelectedFile = { path: string; name: string } | null;
@@ -24,6 +25,7 @@ function AppShell() {
   const [activeAgent, setActiveAgent] = useState<Agent | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [installedModels, setInstalledModels] = useState<InstalledModel[]>([]);
   const [selectedFile, setSelectedFile] = useState<SelectedFile>(null);
 
   const [settingsState, setSettingsState] = useState<
@@ -65,9 +67,21 @@ function AppShell() {
       .catch((e) => console.error("initial load failed", e));
   }, [refreshAgents, refreshSettings]);
 
-  // Check API key status for the effective provider.
+  // Refresh the installed-models list whenever Settings closes (the user may
+  // have downloaded or deleted a model). This feeds the local-model gate below.
+  useEffect(() => {
+    if (settingsState.open) return;
+    modelsApi.listInstalled().then(setInstalledModels).catch(console.error);
+  }, [settingsState.open]);
+
+  // Check API key status for the effective provider. Local models don't use
+  // keychain credentials, so we short-circuit for them.
   useEffect(() => {
     if (!effectiveModel) {
+      setHasApiKey(null);
+      return;
+    }
+    if (effectiveModel.provider === "local") {
       setHasApiKey(null);
       return;
     }
@@ -143,7 +157,17 @@ function AppShell() {
           "Kein Modell konfiguriert — in den Einstellungen einen Default setzen oder im Agenten überschreiben.",
       };
     }
-    if (hasApiKey === false) {
+    if (effectiveModel.provider === "local") {
+      const present = installedModels.some(
+        (m) => m.filename === effectiveModel.modelId,
+      );
+      if (!present) {
+        return {
+          chatDisabled: true,
+          chatDisabledReason: `Lokales Modell „${effectiveModel.modelId}" ist nicht installiert.`,
+        };
+      }
+    } else if (hasApiKey === false) {
       return {
         chatDisabled: true,
         chatDisabledReason: `Kein API-Key für ${effectiveModel.provider} hinterlegt.`,

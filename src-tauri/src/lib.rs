@@ -8,8 +8,8 @@ use tauri::Manager;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::core::llm::{
-    anthropic::AnthropicProvider, openai::OpenAiProvider, openrouter::OpenRouterProvider,
-    ProviderRegistry,
+    anthropic::AnthropicProvider, local_gguf::LocalGgufProvider, openai::OpenAiProvider,
+    openrouter::OpenRouterProvider, ProviderRegistry,
 };
 use crate::core::models::ModelCatalog;
 use crate::core::storage::AppPaths;
@@ -36,6 +36,9 @@ pub fn run() {
             registry.register(Arc::new(AnthropicProvider::new()?));
             registry.register(Arc::new(OpenAiProvider::new()?));
             registry.register(Arc::new(OpenRouterProvider::new()?));
+            registry.register(Arc::new(LocalGgufProvider::new(
+                paths.models_downloads_dir(),
+            )));
 
             let catalog = ModelCatalog::embedded()?;
             tracing::info!(models = catalog.models.len(), "model catalog loaded");

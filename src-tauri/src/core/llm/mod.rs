@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod local_gguf;
 pub mod openai;
 pub mod openai_compat;
 pub mod openrouter;

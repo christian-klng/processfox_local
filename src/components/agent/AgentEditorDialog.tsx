@@ -13,8 +13,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { agentApi, settingsApi } from "@/lib/tauri";
+import { agentApi, modelsApi, settingsApi } from "@/lib/tauri";
 import type { Agent, ModelRef } from "@/types/agent";
+import type { InstalledModel } from "@/types/models";
 import type { Settings } from "@/types/settings";
 
 type Props = {
@@ -33,6 +34,7 @@ const PROVIDER_OPTIONS: { value: string; label: string }[] = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
   { value: "openrouter", label: "OpenRouter" },
+  { value: "local", label: "Lokal (GGUF)" },
 ];
 
 function modelRefToSelection(m: ModelRef | null): ModelSelection {
@@ -40,12 +42,17 @@ function modelRefToSelection(m: ModelRef | null): ModelSelection {
   if (m.type === "cloud") {
     return { kind: "override", provider: m.provider, modelId: m.id };
   }
-  // Local models come in Etappe C; for now treat as inherit.
+  if (m.type === "local") {
+    return { kind: "override", provider: "local", modelId: m.id };
+  }
   return { kind: "inherit" };
 }
 
 function selectionToModelRef(sel: ModelSelection): ModelRef | undefined {
   if (sel.kind === "inherit") return undefined;
+  if (sel.provider === "local") {
+    return { type: "local", id: sel.modelId };
+  }
   return { type: "cloud", provider: sel.provider, id: sel.modelId };
 }
 
@@ -62,12 +69,14 @@ export function AgentEditorDialog({
   const [systemPrompt, setSystemPrompt] = useState("");
   const [selection, setSelection] = useState<ModelSelection>({ kind: "inherit" });
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [installed, setInstalled] = useState<InstalledModel[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     settingsApi.get().then(setSettings).catch(console.error);
+    modelsApi.listInstalled().then(setInstalled).catch(console.error);
     if (mode === "edit" && agent) {
       setName(agent.name);
       setIcon(agent.icon);
@@ -249,28 +258,68 @@ export function AgentEditorDialog({
             </div>
 
             {selection.kind === "override" && (
-              <div className="mt-2 grid grid-cols-[120px_1fr] gap-2">
-                <select
-                  value={selection.provider}
-                  onChange={(e) =>
-                    setSelection({ ...selection, provider: e.target.value })
-                  }
-                  className="h-8 rounded-md border border-border bg-background px-2 text-xs"
-                >
-                  {PROVIDER_OPTIONS.map((p) => (
-                    <option key={p.value} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-                <Input
-                  value={selection.modelId}
-                  onChange={(e) =>
-                    setSelection({ ...selection, modelId: e.target.value })
-                  }
-                  placeholder="z. B. claude-sonnet-4-6"
-                  className="text-xs"
-                />
+              <div className="mt-2 flex flex-col gap-2">
+                <div className="grid grid-cols-[140px_1fr] gap-2">
+                  <select
+                    value={selection.provider}
+                    onChange={(e) => {
+                      const nextProvider = e.target.value;
+                      // Reset the model-id when switching between cloud and
+                      // local, because the ID formats differ (cloud: opaque
+                      // string like "claude-sonnet-4-6"; local: a filename).
+                      setSelection({
+                        kind: "override",
+                        provider: nextProvider,
+                        modelId:
+                          nextProvider === selection.provider
+                            ? selection.modelId
+                            : "",
+                      });
+                    }}
+                    className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                  >
+                    {PROVIDER_OPTIONS.map((p) => (
+                      <option key={p.value} value={p.value}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+
+                  {selection.provider === "local" ? (
+                    installed.length === 0 ? (
+                      <div className="flex items-center rounded-md border border-dashed border-border bg-muted/40 px-3 text-xs text-muted-foreground">
+                        Erst ein Modell in den Einstellungen herunterladen.
+                      </div>
+                    ) : (
+                      <select
+                        value={selection.modelId}
+                        onChange={(e) =>
+                          setSelection({
+                            ...selection,
+                            modelId: e.target.value,
+                          })
+                        }
+                        className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                      >
+                        <option value="">— Modell wählen —</option>
+                        {installed.map((m) => (
+                          <option key={m.filename} value={m.filename}>
+                            {m.filename}
+                          </option>
+                        ))}
+                      </select>
+                    )
+                  ) : (
+                    <Input
+                      value={selection.modelId}
+                      onChange={(e) =>
+                        setSelection({ ...selection, modelId: e.target.value })
+                      }
+                      placeholder="z. B. claude-sonnet-4-6"
+                      className="text-xs"
+                    />
+                  )}
+                </div>
               </div>
             )}
           </div>
