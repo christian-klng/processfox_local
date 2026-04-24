@@ -61,9 +61,10 @@ keyring = { version = "3", features = [
 
 sysinfo = "0.33"
 
-# Local GGUF runtime. Metal is intentionally off for now — it requires the
-# `MetalToolchain` Xcode component whose download is currently failing on
-# Apple's side for some Xcode builds. Re-enable by adding
-# `features = ["metal"]` once `sudo xcodebuild -downloadComponent MetalToolchain`
-# succeeds; expect ~3–5× faster local inference on Apple Silicon.
+# Local GGUF runtime. On macOS we enable Metal for GPU acceleration (requires
+# full Xcode + `MetalToolchain` via `sudo xcodebuild -downloadComponent
+# MetalToolchain`). Other targets stay CPU-only so the build is portable.
 mistralrs = { version = "0.8", default-features = false }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mistralrs = { version = "0.8", default-features = false, features = ["metal"] }
