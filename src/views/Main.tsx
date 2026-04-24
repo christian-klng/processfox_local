@@ -9,13 +9,18 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import type { Agent } from "@/types/agent";
-import type { Message } from "@/types/message";
+import type { ChatMessage } from "@/types/chat";
 
 type Props = {
   agents: Agent[];
   activeAgent: Agent | null;
   selectedFile: { path: string; name: string } | null;
-  messages: Message[];
+  messages: ChatMessage[];
+  streamingText: string | null;
+  sending: boolean;
+  chatError: string | null;
+  chatDisabled: boolean;
+  chatDisabledReason: string | undefined;
   onSelectAgent: (agent: Agent) => void;
   onCreateAgent: () => void;
   onEditAgent: () => void;
@@ -23,6 +28,8 @@ type Props = {
   onSelectFile: (path: string, name: string) => void;
   onClosePreview: () => void;
   onSendMessage: (text: string) => void;
+  onCancelRun: () => void;
+  onDismissChatError: () => void;
 };
 
 export function Main({
@@ -30,6 +37,11 @@ export function Main({
   activeAgent,
   selectedFile,
   messages,
+  streamingText,
+  sending,
+  chatError,
+  chatDisabled,
+  chatDisabledReason,
   onSelectAgent,
   onCreateAgent,
   onEditAgent,
@@ -37,16 +49,16 @@ export function Main({
   onSelectFile,
   onClosePreview,
   onSendMessage,
+  onCancelRun,
+  onDismissChatError,
 }: Props) {
   const showPreview = selectedFile !== null;
-  const chatDisabled = activeAgent === null;
 
   return (
     <ResizablePanelGroup
       direction="horizontal"
       className="h-full w-full bg-background"
     >
-      {/* Left: sidebar */}
       <ResizablePanel defaultSize={22} minSize={16} maxSize={36}>
         <div className="flex h-full flex-col border-r border-border bg-surface">
           <AgentSwitcher
@@ -71,7 +83,6 @@ export function Main({
 
       <ResizableHandle />
 
-      {/* Middle: preview (only visible when a file is selected) */}
       {showPreview && (
         <>
           <ResizablePanel defaultSize={38} minSize={20}>
@@ -85,13 +96,18 @@ export function Main({
         </>
       )}
 
-      {/* Right: chat */}
       <ResizablePanel defaultSize={showPreview ? 40 : 78} minSize={30}>
         <ChatPane
           messages={messages}
+          streamingText={streamingText}
+          sending={sending}
+          error={chatError}
           disabled={chatDisabled}
-          disabledReason="Leg zunächst einen Agenten an."
+          disabledReason={chatDisabledReason}
           onSend={onSendMessage}
+          onCancel={onCancelRun}
+          onDismissError={onDismissChatError}
+          onOpenSettings={onOpenSettings}
         />
       </ResizablePanel>
     </ResizablePanelGroup>

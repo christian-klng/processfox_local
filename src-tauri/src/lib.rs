@@ -2,9 +2,15 @@ pub mod commands;
 pub mod core;
 pub mod state;
 
+use std::sync::Arc;
+
 use tauri::Manager;
 use tracing_subscriber::{fmt, EnvFilter};
 
+use crate::core::llm::{
+    anthropic::AnthropicProvider, openai::OpenAiProvider, openrouter::OpenRouterProvider,
+    ProviderRegistry,
+};
 use crate::core::storage::AppPaths;
 use crate::state::AppState;
 
@@ -24,7 +30,13 @@ pub fn run() {
             let paths = AppPaths::discover()?;
             paths.ensure_dirs()?;
             tracing::info!(root = %paths.root().display(), "ProcessFox app data initialized");
-            app.manage(AppState::new(paths));
+
+            let mut registry = ProviderRegistry::new();
+            registry.register(Arc::new(AnthropicProvider::new()?));
+            registry.register(Arc::new(OpenAiProvider::new()?));
+            registry.register(Arc::new(OpenRouterProvider::new()?));
+
+            app.manage(AppState::new(paths, registry));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -34,6 +46,18 @@ pub fn run() {
             commands::agent::update_agent,
             commands::agent::delete_agent,
             commands::file::list_agent_folder,
+            commands::settings::get_settings,
+            commands::settings::set_default_provider,
+            commands::settings::set_default_model,
+            commands::settings::set_first_run_done,
+            commands::settings::available_providers,
+            commands::secrets::set_api_key,
+            commands::secrets::has_api_key,
+            commands::secrets::clear_api_key,
+            commands::secrets::validate_api_key,
+            commands::chat::list_messages,
+            commands::chat::send_message,
+            commands::chat::cancel_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

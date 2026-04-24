@@ -45,6 +45,24 @@ pub enum CoreError {
 
     #[error("App-Support-Ordner konnte nicht ermittelt werden")]
     AppSupportUnavailable,
+
+    #[error("Schlüsselbund-Fehler: {0}")]
+    Keyring(String),
+
+    #[error("Kein API-Key hinterlegt für Provider {0}")]
+    MissingApiKey(String),
+
+    #[error("Provider unbekannt: {0}")]
+    UnknownProvider(String),
+
+    #[error("LLM-Fehler: {0}")]
+    Llm(String),
+
+    #[error("Netzwerk-Fehler: {0}")]
+    Http(String),
+
+    #[error("Generation abgebrochen")]
+    Cancelled,
 }
 
 impl From<CoreError> for CommandError {
@@ -56,6 +74,12 @@ impl From<CoreError> for CommandError {
             CoreError::PathInvalid(_) => "path_invalid",
             CoreError::AgentNotFound(_) => "agent_not_found",
             CoreError::AppSupportUnavailable => "app_support_unavailable",
+            CoreError::Keyring(_) => "keyring_error",
+            CoreError::MissingApiKey(_) => "missing_api_key",
+            CoreError::UnknownProvider(_) => "unknown_provider",
+            CoreError::Llm(_) => "llm_error",
+            CoreError::Http(_) => "http_error",
+            CoreError::Cancelled => "cancelled",
         };
         CommandError::new(code, err.to_string())
     }

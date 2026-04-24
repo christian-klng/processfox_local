@@ -13,8 +13,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { agentApi } from "@/lib/tauri";
-import type { Agent } from "@/types/agent";
+import { agentApi, settingsApi } from "@/lib/tauri";
+import type { Agent, ModelRef } from "@/types/agent";
+import type { Settings } from "@/types/settings";
 
 type Props = {
   open: boolean;
@@ -23,6 +24,30 @@ type Props = {
   onClose: () => void;
   onSaved: (agent: Agent) => void;
 };
+
+type ModelSelection =
+  | { kind: "inherit" }
+  | { kind: "override"; provider: string; modelId: string };
+
+const PROVIDER_OPTIONS: { value: string; label: string }[] = [
+  { value: "anthropic", label: "Anthropic" },
+  { value: "openai", label: "OpenAI" },
+  { value: "openrouter", label: "OpenRouter" },
+];
+
+function modelRefToSelection(m: ModelRef | null): ModelSelection {
+  if (!m) return { kind: "inherit" };
+  if (m.type === "cloud") {
+    return { kind: "override", provider: m.provider, modelId: m.id };
+  }
+  // Local models come in Etappe C; for now treat as inherit.
+  return { kind: "inherit" };
+}
+
+function selectionToModelRef(sel: ModelSelection): ModelRef | undefined {
+  if (sel.kind === "inherit") return undefined;
+  return { type: "cloud", provider: sel.provider, id: sel.modelId };
+}
 
 export function AgentEditorDialog({
   open: isOpen,
@@ -35,21 +60,26 @@ export function AgentEditorDialog({
   const [icon, setIcon] = useState("🦊");
   const [folder, setFolder] = useState<string | null>(null);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [selection, setSelection] = useState<ModelSelection>({ kind: "inherit" });
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
+    settingsApi.get().then(setSettings).catch(console.error);
     if (mode === "edit" && agent) {
       setName(agent.name);
       setIcon(agent.icon);
       setFolder(agent.folder);
       setSystemPrompt(agent.systemPrompt);
+      setSelection(modelRefToSelection(agent.model));
     } else {
       setName("");
       setIcon("🦊");
       setFolder(null);
       setSystemPrompt("");
+      setSelection({ kind: "inherit" });
     }
     setError(null);
   }, [isOpen, mode, agent]);
@@ -67,6 +97,7 @@ export function AgentEditorDialog({
     setSubmitting(true);
     setError(null);
     try {
+      const model = selectionToModelRef(selection);
       const saved =
         mode === "create"
           ? await agentApi.create({
@@ -74,6 +105,7 @@ export function AgentEditorDialog({
               icon,
               folder: folder ?? undefined,
               systemPrompt,
+              model,
               skills: [],
             })
           : await agentApi.update(agent!.id, {
@@ -81,11 +113,11 @@ export function AgentEditorDialog({
               icon,
               folder: folder ?? undefined,
               systemPrompt,
+              model,
             });
       onSaved(saved);
       onClose();
     } catch (e) {
-      // CommandError or plain string
       const msg =
         typeof e === "object" && e && "message" in e
           ? String((e as { message: unknown }).message)
@@ -96,9 +128,17 @@ export function AgentEditorDialog({
     }
   }
 
+  const inheritedHint = (() => {
+    if (!settings) return "…";
+    const provider = settings.defaultProvider;
+    if (!provider) return "Kein Default gesetzt (in Einstellungen konfigurieren).";
+    const model = settings.defaultModels?.[provider];
+    return model ? `${provider} · ${model}` : `${provider} · kein Default-Modell`;
+  })();
+
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-[520px]">
+      <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
             {mode === "create" ? "Neuer Agent" : "Agent bearbeiten"}
@@ -163,6 +203,76 @@ export function AgentEditorDialog({
               placeholder="Beschreibe, wie der Agent antworten soll …"
               className="resize-none"
             />
+          </div>
+
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Modell</Label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSelection({ kind: "inherit" })}
+                className={`flex-1 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  selection.kind === "inherit"
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-background hover:bg-accent"
+                }`}
+              >
+                <div className="font-medium">Default</div>
+                <div className="mt-0.5 text-muted-foreground">
+                  {inheritedHint}
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setSelection({
+                    kind: "override",
+                    provider:
+                      selection.kind === "override"
+                        ? selection.provider
+                        : "anthropic",
+                    modelId:
+                      selection.kind === "override" ? selection.modelId : "",
+                  })
+                }
+                className={`flex-1 rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                  selection.kind === "override"
+                    ? "border-primary bg-primary/10"
+                    : "border-border bg-background hover:bg-accent"
+                }`}
+              >
+                <div className="font-medium">Override</div>
+                <div className="mt-0.5 text-muted-foreground">
+                  Modell für diesen Agenten festlegen
+                </div>
+              </button>
+            </div>
+
+            {selection.kind === "override" && (
+              <div className="mt-2 grid grid-cols-[120px_1fr] gap-2">
+                <select
+                  value={selection.provider}
+                  onChange={(e) =>
+                    setSelection({ ...selection, provider: e.target.value })
+                  }
+                  className="h-8 rounded-md border border-border bg-background px-2 text-xs"
+                >
+                  {PROVIDER_OPTIONS.map((p) => (
+                    <option key={p.value} value={p.value}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+                <Input
+                  value={selection.modelId}
+                  onChange={(e) =>
+                    setSelection({ ...selection, modelId: e.target.value })
+                  }
+                  placeholder="z. B. claude-sonnet-4-6"
+                  className="text-xs"
+                />
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-1.5">
