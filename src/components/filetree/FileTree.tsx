@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
 import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
 
@@ -17,6 +17,8 @@ type TreeNode = {
 type Props = {
   agentId: string | null;
   hasFolder: boolean;
+  /** Bump to force a refetch (e.g. after a chat message is sent). */
+  refreshSignal?: number;
   onSelectFile: (path: string, name: string) => void;
   onRequestPickFolder: () => void;
 };
@@ -24,6 +26,7 @@ type Props = {
 export function FileTree({
   agentId,
   hasFolder,
+  refreshSignal,
   onSelectFile,
   onRequestPickFolder,
 }: Props) {
@@ -45,18 +48,16 @@ export function FileTree({
     return () => ro.disconnect();
   }, []);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     if (!agentId || !hasFolder) {
       setData([]);
       return;
     }
-    let cancelled = false;
     setLoading(true);
     setError(null);
     fileApi
       .listAgentFolder(agentId)
       .then((entries: FileEntry[]) => {
-        if (cancelled) return;
         setData(
           entries.map((e) => ({
             id: e.path,
@@ -68,16 +69,28 @@ export function FileTree({
         );
       })
       .catch((err) => {
-        if (cancelled) return;
         setError(typeof err === "string" ? err : (err?.message ?? String(err)));
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
-    return () => {
-      cancelled = true;
-    };
   }, [agentId, hasFolder]);
+
+  // Initial load, re-load on agent / folder change, and re-load whenever
+  // the parent bumps `refreshSignal` (typically when a chat message is sent
+  // — common moment for the file system to have changed).
+  useEffect(() => {
+    refresh();
+  }, [refresh, refreshSignal]);
+
+  // Re-load whenever the window regains focus — typical cadence for users
+  // who jumped to Finder to drop files in the agent folder.
+  useEffect(() => {
+    if (!agentId || !hasFolder) return;
+    const handler = () => refresh();
+    window.addEventListener("focus", handler);
+    return () => window.removeEventListener("focus", handler);
+  }, [agentId, hasFolder, refresh]);
 
   const content = useMemo(() => {
     if (!agentId) {

@@ -15,7 +15,9 @@ use crate::core::models::ModelCatalog;
 use crate::core::skill::SkillRegistry;
 use crate::core::storage::AppPaths;
 use crate::core::tool::{
-    tools::{GrepInFilesTool, ListFolderTool, ReadFileTool},
+    tools::{
+        GrepInFilesTool, ListFolderTool, ReadDocxTool, ReadFileTool, ReadPdfTool, ReadXlsxRangeTool,
+    },
     ToolRegistry,
 };
 use crate::state::AppState;
@@ -52,6 +54,9 @@ pub fn run() {
             tools.register(Arc::new(ListFolderTool));
             tools.register(Arc::new(ReadFileTool));
             tools.register(Arc::new(GrepInFilesTool));
+            tools.register(Arc::new(ReadPdfTool));
+            tools.register(Arc::new(ReadDocxTool));
+            tools.register(Arc::new(ReadXlsxRangeTool));
             tracing::info!(tools = tools.names().len(), "tool registry ready");
 
             let skills = SkillRegistry::load_builtin()?;

@@ -29,6 +29,7 @@ function AppShell() {
   const [installedModels, setInstalledModels] = useState<InstalledModel[]>([]);
   const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedFile, setSelectedFile] = useState<SelectedFile>(null);
+  const [fileTreeRefresh, setFileTreeRefresh] = useState(0);
 
   const [settingsState, setSettingsState] = useState<
     { open: false } | { open: true; tab: "models" | "cloud" | "appearance" | "about" }
@@ -43,6 +44,16 @@ function AppShell() {
   );
 
   const chat = useAgentChat(activeAgent, effectiveModel);
+
+  const handleSendMessage = useCallback(
+    (text: string) => {
+      // Bump the file-tree's refresh signal: the user often dropped new
+      // files in their agent folder right before prompting about them.
+      setFileTreeRefresh((n) => n + 1);
+      chat.send(text);
+    },
+    [chat],
+  );
 
   const refreshAgents = useCallback(async () => {
     const list = await agentApi.list();
@@ -199,13 +210,14 @@ function AppShell() {
         chatDisabled={chatDisabled}
         chatDisabledReason={chatDisabledReason}
         skills={skills}
+        fileTreeRefresh={fileTreeRefresh}
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
         onEditAgent={handleEditAgent}
         onOpenSettings={handleOpenSettings}
         onSelectFile={handleSelectFile}
         onClosePreview={handleClosePreview}
-        onSendMessage={chat.send}
+        onSendMessage={handleSendMessage}
         onCancelRun={chat.cancel}
         onDismissChatError={chat.clearError}
       />

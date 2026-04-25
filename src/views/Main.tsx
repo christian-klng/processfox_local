@@ -25,6 +25,7 @@ type Props = {
   chatDisabled: boolean;
   chatDisabledReason: string | undefined;
   skills: Skill[];
+  fileTreeRefresh: number;
   onSelectAgent: (agent: Agent) => void;
   onCreateAgent: () => void;
   onEditAgent: () => void;
@@ -48,6 +49,7 @@ export function Main({
   chatDisabled,
   chatDisabledReason,
   skills,
+  fileTreeRefresh,
   onSelectAgent,
   onCreateAgent,
   onEditAgent,
@@ -80,6 +82,7 @@ export function Main({
             <FileTree
               agentId={activeAgent?.id ?? null}
               hasFolder={Boolean(activeAgent?.folder)}
+              refreshSignal={fileTreeRefresh}
               onSelectFile={onSelectFile}
               onRequestPickFolder={onEditAgent}
             />
