@@ -1,4 +1,5 @@
 pub mod anthropic;
+pub mod json_cleanup;
 pub mod local_gguf;
 pub mod openai;
 pub mod openai_compat;
@@ -93,6 +94,11 @@ pub struct GenerateRequest {
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum LlmEvent {
     TextDelta { text: String },
+    /// Chain-of-thought / reasoning content emitted in a separate channel
+    /// from the visible answer (e.g. Gemma 4's `<|channel>thought`,
+    /// DeepSeek's `<think>` blocks). Surfaced in the UI as a separate
+    /// collapsible chip rather than inline in the assistant bubble.
+    ReasoningDelta { text: String },
     ToolCall(ToolCall),
     Finish { reason: FinishReason },
     Error { code: String, message: String },

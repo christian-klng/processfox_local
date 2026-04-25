@@ -204,6 +204,7 @@ function AppShell() {
         selectedFile={selectedFile}
         messages={chat.messages}
         streamingText={chat.streamingText}
+        streamingReasoning={chat.streamingReasoning}
         pendingTools={chat.pendingTools}
         sending={chat.sending}
         chatError={chat.error}

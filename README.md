@@ -19,7 +19,7 @@ Die App orientiert sich am Bedien-Paradigma von Obsidian: linke Sidebar mit Date
 - Desktop: **Tauri v2**
 - Frontend: **React + Vite + TypeScript**
 - Backend: **Rust** (pure Rust, keine Python-Abhängigkeit)
-- Lokale LLM-Runtime: **Rust-native** (candle oder mistral.rs, finale Wahl im ersten Prototypen)
+- Lokale LLM-Runtime: **llama.cpp via `llama-cpp-2`** (Rust-Bindings mit nativem Tool-Calling über Chat-Templates)
 - Distribution: **GitHub Releases** mit Auto-Updater via GitHub Actions
 
 ## Status
@@ -28,14 +28,32 @@ Sehr früh. v1.0-Konzept steht, Entwicklung beginnt. Siehe [CONCEPT.md](CONCEPT.
 
 ## Schnellstart für Mitentwickler
 
-```bash
-# Projekt initialisieren (einmalig, wenn kein src-tauri/ vorhanden)
-npm create tauri-app@latest
+### Build-Voraussetzungen
 
-# Danach
+Die lokale GGUF-Runtime kompiliert llama.cpp aus C++ — entsprechend ein paar
+einmalige Setup-Schritte:
+
+**macOS** (Apple Silicon empfohlen):
+- **Xcode + Command Line Tools** installiert
+- **Metal-Toolchain**: `sudo xcodebuild -downloadComponent MetalToolchain`
+- **Homebrew + cmake**: `brew install cmake`
+
+**Linux**:
+- `build-essential`, `cmake`, `pkg-config`
+
+**Windows**:
+- Visual Studio 2022 mit C++ Build-Tools
+- cmake im PATH
+
+### Dev-Server
+
+```bash
 npm install
 npm run tauri dev
 ```
+
+Erster Build kompiliert llama.cpp inklusive Metal-Kernels (~10 Min). Danach
+ist der Cache warm und Iteration ist schnell.
 
 Siehe [CLAUDE.md](CLAUDE.md) für Arbeits-Anweisungen, wenn du Claude Code zur Entwicklung nutzt.
 

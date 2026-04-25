@@ -19,6 +19,8 @@ export interface ChatMessage {
   createdAt: string;
   toolCalls?: ToolCall[];
   toolResults?: ToolResult[];
+  /** Chain-of-thought / reasoning extracted from the model's output. */
+  reasoning?: string;
 }
 
 export interface RunStarted {
@@ -28,6 +30,7 @@ export interface RunStarted {
 
 export type RunEvent =
   | { type: "delta"; text: string }
+  | { type: "reasoningDelta"; text: string }
   | {
       type: "toolCallStarted";
       id: string;

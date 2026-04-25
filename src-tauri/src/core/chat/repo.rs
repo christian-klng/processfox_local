@@ -32,6 +32,11 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolCall>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_results: Vec<ToolResult>,
+    /// Chain-of-thought content extracted from the model (Gemma 4 channel
+    /// tags, DeepSeek `<think>` blocks). Rendered as a separate collapsible
+    /// chip in the UI rather than inline in the visible answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 impl ChatMessage {
@@ -43,6 +48,7 @@ impl ChatMessage {
             created_at: Utc::now().to_rfc3339(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),
+            reasoning: None,
         }
     }
 }

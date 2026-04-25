@@ -11,6 +11,14 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { modelsApi, settingsApi } from "@/lib/tauri";
@@ -48,6 +56,10 @@ type Props = {
 export function ModelsTab({ settings, onSettingsChange }: Props) {
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [installed, setInstalled] = useState<InstalledModel[]>([]);
+  const [pendingDelete, setPendingDelete] = useState<InstalledModel | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
   const [hardware, setHardware] = useState<HardwareInfo | null>(null);
   const [downloads, setDownloads] = useState<Record<string, DownloadState>>({});
   const unlistenRefs = useRef<Record<string, UnlistenFn>>({});
@@ -168,12 +180,22 @@ export function ModelsTab({ settings, onSettingsChange }: Props) {
     }
   }
 
-  async function deleteInstalled(filename: string) {
+  function requestDelete(filename: string) {
+    const entry = installed.find((m) => m.filename === filename);
+    if (entry) setPendingDelete(entry);
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return;
+    setDeleting(true);
     try {
-      await modelsApi.deleteModel(filename);
+      await modelsApi.deleteModel(pendingDelete.filename);
       await refresh();
+      setPendingDelete(null);
     } catch (e) {
       console.error(e);
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -196,7 +218,7 @@ export function ModelsTab({ settings, onSettingsChange }: Props) {
               download={dl}
               onDownload={() => startCatalogDownload(entry)}
               onCancel={() => cancelDownload(entry.id)}
-              onDelete={() => deleteInstalled(entry.filename)}
+              onDelete={() => requestDelete(entry.filename)}
               onDismissError={() =>
                 setDownload(entry.id, { status: "idle" })
               }
@@ -223,6 +245,43 @@ export function ModelsTab({ settings, onSettingsChange }: Props) {
         }}
         onCancel={cancelDownload}
       />
+
+      <Dialog
+        open={pendingDelete !== null}
+        onOpenChange={(v) => !v && !deleting && setPendingDelete(null)}
+      >
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>Modell löschen?</DialogTitle>
+            <DialogDescription className="pt-2 text-foreground">
+              <span className="font-mono text-xs">
+                {pendingDelete?.filename}
+              </span>
+              <span className="mt-2 block text-muted-foreground">
+                {pendingDelete
+                  ? `Diese Datei (${formatBytes(pendingDelete.sizeBytes)}) wird sofort von der Festplatte entfernt — kein Papierkorb. Erneuter Download ist jederzeit aus dem Katalog möglich.`
+                  : ""}
+              </span>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="ghost"
+              onClick={() => setPendingDelete(null)}
+              disabled={deleting}
+            >
+              Abbrechen
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Lösche …" : "Löschen"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

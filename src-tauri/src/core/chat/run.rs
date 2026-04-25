@@ -37,6 +37,9 @@ pub enum RunEvent {
     Delta {
         text: String,
     },
+    ReasoningDelta {
+        text: String,
+    },
     ToolCallStarted {
         id: String,
         name: String,
@@ -128,9 +131,16 @@ impl ChatRunner {
         let active = self.active.clone();
 
         tokio::spawn(async move {
+            use futures_util::FutureExt;
+            use std::panic::AssertUnwindSafe;
+
             let channel = format!("chat:run:{run_id_bg}");
 
-            match react_loop(
+            // Wrap the loop in catch_unwind so a panic deep in the provider
+            // (e.g. an unsupported GGUF architecture in the inference engine)
+            // surfaces as a clean error event in the UI instead of a silent
+            // worker-thread death.
+            let outcome = AssertUnwindSafe(react_loop(
                 &app,
                 &channel,
                 provider,
@@ -141,10 +151,12 @@ impl ChatRunner {
                 &model_id,
                 &assistant_id_bg,
                 cancel.clone(),
-            )
-            .await
-            {
-                Ok(final_msg) => {
+            ))
+            .catch_unwind()
+            .await;
+
+            match outcome {
+                Ok(Ok(final_msg)) => {
                     let _ = app.emit(
                         &channel,
                         RunEvent::Finish {
@@ -153,7 +165,7 @@ impl ChatRunner {
                         },
                     );
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     let code = match &e {
                         CoreError::Cancelled => "cancelled",
                         _ => "llm_error",
@@ -163,6 +175,23 @@ impl ChatRunner {
                         RunEvent::Error {
                             code: code.to_string(),
                             message: e.to_string(),
+                        },
+                    );
+                }
+                Err(panic) => {
+                    let panic_msg = panic
+                        .downcast_ref::<&str>()
+                        .map(|s| (*s).to_string())
+                        .or_else(|| panic.downcast_ref::<String>().cloned())
+                        .unwrap_or_else(|| "panic without payload".to_string());
+                    tracing::error!(panic = %panic_msg, "chat run panicked");
+                    let _ = app.emit(
+                        &channel,
+                        RunEvent::Error {
+                            code: "panic".to_string(),
+                            message: format!(
+                                "Provider crashte intern. Bitte einen anderen Provider/ein anderes Modell wählen. Detail: {panic_msg}"
+                            ),
                         },
                     );
                 }
@@ -216,7 +245,7 @@ async fn react_loop(
     }
 
     for _ in 0..MAX_REACT_ITERATIONS {
-        let (text, tool_calls, finish_reason) = run_single_call(
+        let (text, reasoning, tool_calls, finish_reason) = run_single_call(
             app,
             channel,
             provider.clone(),
@@ -238,8 +267,9 @@ async fn react_loop(
                 created_at: chrono::Utc::now().to_rfc3339(),
                 tool_calls: Vec::new(),
                 tool_results: Vec::new(),
+                reasoning: reasoning.clone(),
             };
-            if !assistant_msg.content.is_empty() {
+            if !assistant_msg.content.is_empty() || reasoning.is_some() {
                 let _ = repo.append(&agent.id, &assistant_msg);
             }
             return Ok(assistant_msg);
@@ -262,6 +292,7 @@ async fn react_loop(
             created_at: chrono::Utc::now().to_rfc3339(),
             tool_calls: tool_calls.clone(),
             tool_results: Vec::new(),
+            reasoning: reasoning.clone(),
         };
         let _ = repo.append(&agent.id, &assistant_persist);
 
@@ -316,6 +347,7 @@ async fn react_loop(
             created_at: chrono::Utc::now().to_rfc3339(),
             tool_calls: Vec::new(),
             tool_results: results,
+            reasoning: None,
         };
         let _ = repo.append(&agent.id, &tool_persist);
 
@@ -340,7 +372,7 @@ async fn run_single_call(
     system_prompt: Option<String>,
     turns: Vec<ChatTurn>,
     cancel: CancellationToken,
-) -> CoreResult<(String, Vec<ToolCall>, FinishReason)> {
+) -> CoreResult<(String, Option<String>, Vec<ToolCall>, FinishReason)> {
     let (tx, mut rx) = mpsc::channel::<LlmEvent>(64);
 
     let request = GenerateRequest {
@@ -358,6 +390,7 @@ async fn run_single_call(
         tokio::spawn(async move { provider_bg.generate(request, tx, cancel_for_provider).await });
 
     let mut buffer = String::new();
+    let mut reasoning_buffer = String::new();
     let mut tool_calls: Vec<ToolCall> = Vec::new();
     let mut finish_reason: Option<FinishReason> = None;
     let mut terminal_error: Option<(String, String)> = None;
@@ -367,6 +400,10 @@ async fn run_single_call(
             LlmEvent::TextDelta { text } => {
                 buffer.push_str(&text);
                 let _ = app.emit(channel, RunEvent::Delta { text });
+            }
+            LlmEvent::ReasoningDelta { text } => {
+                reasoning_buffer.push_str(&text);
+                let _ = app.emit(channel, RunEvent::ReasoningDelta { text });
             }
             LlmEvent::ToolCall(call) => {
                 let _ = app.emit(
@@ -392,8 +429,14 @@ async fn run_single_call(
     if let Some((code, message)) = terminal_error {
         return Err(CoreError::Llm(format!("{code}: {message}")));
     }
+    let reasoning = if reasoning_buffer.trim().is_empty() {
+        None
+    } else {
+        Some(reasoning_buffer)
+    };
     Ok((
         buffer,
+        reasoning,
         tool_calls,
         finish_reason.unwrap_or(FinishReason::Stop),
     ))

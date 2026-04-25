@@ -36,6 +36,10 @@ impl LlmProvider for OpenRouterProvider {
         "openrouter"
     }
 
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
     async fn generate(
         &self,
         request: GenerateRequest,

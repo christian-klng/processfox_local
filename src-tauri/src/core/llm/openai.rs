@@ -25,6 +25,10 @@ impl LlmProvider for OpenAiProvider {
         "openai"
     }
 
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
     async fn generate(
         &self,
         request: GenerateRequest,

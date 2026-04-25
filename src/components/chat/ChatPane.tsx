@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { AlertCircle, Loader2, Square, X } from "lucide-react";
 
 import { ChatInput } from "@/components/chat/ChatInput";
+import { ReasoningChip } from "@/components/chat/ReasoningChip";
 import { ToolCallChip } from "@/components/chat/ToolCallChip";
 import { Button } from "@/components/ui/button";
 import type { PendingToolCall } from "@/hooks/useAgentChat";
@@ -10,6 +11,7 @@ import type { ChatMessage } from "@/types/chat";
 type Props = {
   messages: ChatMessage[];
   streamingText: string | null;
+  streamingReasoning: string | null;
   pendingTools: PendingToolCall[];
   sending: boolean;
   error: string | null;
@@ -24,6 +26,7 @@ type Props = {
 export function ChatPane({
   messages,
   streamingText,
+  streamingReasoning,
   pendingTools,
   sending,
   error,
@@ -70,6 +73,11 @@ export function ChatPane({
                 toolResults={findToolResults(m, messages)}
               />
             ))}
+
+            {streamingReasoning !== null &&
+              streamingReasoning.length > 0 && (
+                <ReasoningChip text={streamingReasoning} streaming />
+              )}
 
             {pendingTools.length > 0 && (
               <div className="flex flex-col gap-1.5">
@@ -184,19 +192,18 @@ function MessageBlock({
     );
   }
 
-  // Assistant message: render tool chips followed by text (matches the order
-  // mistralrs/Anthropic stream them in).
+  // Assistant message: render reasoning chip + tool chips, then the text.
+  const reasoning = message.reasoning?.trim();
   return (
     <div className="flex flex-col gap-1.5">
+      {reasoning && reasoning.length > 0 && (
+        <ReasoningChip text={reasoning} />
+      )}
       {hasToolCalls && (
         <div className="flex flex-col gap-1">
           {message.toolCalls!.map((tc) => {
             const res = toolResults[tc.id];
-            const status = res
-              ? res.isError
-                ? "error"
-                : "done"
-              : "done";
+            const status = res ? (res.isError ? "error" : "done") : "done";
             return (
               <ToolCallChip
                 key={tc.id}

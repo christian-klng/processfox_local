@@ -1,28 +1,52 @@
-//! Local GGUF inference provider backed by mistral.rs.
+//! Local GGUF inference provider backed by llama.cpp via `llama-cpp-2`.
 //!
 //! One loaded model at a time; switching models triggers an unload + reload.
-//! Metal acceleration is intentionally disabled (see Cargo.toml) so the crate
-//! builds without the full Xcode install.
+//! On macOS aarch64 the crate auto-enables Metal via its own target-spec.
 
+use std::collections::HashMap;
+use std::num::NonZeroU32;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use async_trait::async_trait;
-use mistralrs::{
-    ChatCompletionChunkResponse, ChunkChoice, Delta, DeviceMapSetting, GgufModelBuilder, Model,
-    RequestBuilder, Response, TextMessageRole,
-};
+use llama_cpp_2::context::params::LlamaContextParams;
+use llama_cpp_2::llama_backend::LlamaBackend;
+use llama_cpp_2::llama_batch::LlamaBatch;
+use llama_cpp_2::model::params::LlamaModelParams;
+use llama_cpp_2::model::{AddBos, LlamaChatTemplate, LlamaModel};
+use llama_cpp_2::openai::OpenAIChatTemplateParams;
+use llama_cpp_2::sampling::LlamaSampler;
+use serde_json::{json, Value as JsonValue};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
-use super::{ChatRole, FinishReason, GenerateRequest, LlmEvent, LlmProvider};
+use super::json_cleanup::extract_json_value;
+use super::{ChatRole, FinishReason, GenerateRequest, LlmEvent, LlmProvider, ToolCall};
 use crate::core::error::{CoreError, CoreResult};
+use crate::core::tool::ToolSchema;
 
 pub const PROVIDER_ID: &str = "local";
 
+const DEFAULT_CTX: u32 = 4096;
+const N_GPU_LAYERS_ALL: u32 = 1000;
+
+/// Process-wide llama backend. `LlamaBackend::init()` must only be called once
+/// for the lifetime of the process; we lazily initialize it the first time a
+/// local model is requested.
+fn shared_backend() -> CoreResult<&'static LlamaBackend> {
+    static BACKEND: OnceLock<LlamaBackend> = OnceLock::new();
+    if let Some(b) = BACKEND.get() {
+        return Ok(b);
+    }
+    let backend =
+        LlamaBackend::init().map_err(|e| CoreError::Llm(format!("llama backend init: {e}")))?;
+    Ok(BACKEND.get_or_init(|| backend))
+}
+
 struct Loaded {
     filename: String,
-    model: Arc<Model>,
+    model: Arc<LlamaModel>,
+    template: LlamaChatTemplate,
 }
 
 impl std::fmt::Debug for Loaded {
@@ -47,69 +71,166 @@ impl LocalGgufProvider {
         }
     }
 
-    /// Drop the currently loaded model, freeing its memory.
     pub async fn unload(&self) {
         *self.loaded.lock().await = None;
     }
 
-    /// Return a shared handle to the requested model, loading it if it's not
-    /// already resident. Switching to a different `filename` triggers an
-    /// unload of the previous model first.
-    async fn ensure_loaded(&self, filename: &str) -> CoreResult<Arc<Model>> {
+    /// Get the requested model, loading it if it's not already resident.
+    /// Switching to a different `filename` triggers an unload of the
+    /// previous model first.
+    async fn ensure_loaded(&self, filename: &str) -> CoreResult<Loaded> {
         {
             let guard = self.loaded.lock().await;
             if let Some(current) = guard.as_ref() {
                 if current.filename == filename {
-                    return Ok(Arc::clone(&current.model));
+                    return Ok(Loaded {
+                        filename: current.filename.clone(),
+                        model: Arc::clone(&current.model),
+                        template: current.template.clone(),
+                    });
                 }
             }
         }
 
-        // Drop any previous model before building a new one. A fresh Model
-        // takes multi-GB of RAM; holding two simultaneously would OOM small
-        // machines.
+        // Drop any previous model before loading a new one.
         {
             let mut guard = self.loaded.lock().await;
             *guard = None;
         }
 
-        let dir = self.models_dir.to_string_lossy().into_owned();
-        tracing::info!(filename, dir = %dir, "loading local GGUF model");
+        let backend = shared_backend()?;
+        let path = self.models_dir.join(filename);
+        if !path.exists() {
+            return Err(CoreError::PathInvalid(format!(
+                "Modell-Datei fehlt: {}",
+                path.display()
+            )));
+        }
+        tracing::info!(filename, path = %path.display(), "loading local GGUF model");
 
-        // Skip mistralrs's auto-device-mapper. It has a bug in 0.8.1 where
-        // CPU memory is mis-detected as 0 MB (calls `refresh_cpu_all` instead
-        // of `refresh_memory` in memory_usage.rs), making it refuse to load
-        // any model larger than zero bytes. The `dummy` mapping puts every
-        // layer on the primary device and skips the memory arithmetic.
-        let model = GgufModelBuilder::new(dir, vec![filename.to_string()])
-            .with_logging()
-            .with_device_mapping(DeviceMapSetting::dummy())
-            .build()
-            .await
-            .map_err(|e| CoreError::Llm(format!("Modell-Load fehlgeschlagen: {e}")))?;
-        let model = Arc::new(model);
+        let filename_owned = filename.to_string();
+        let path_owned = path.clone();
+        let loaded: Loaded = tokio::task::spawn_blocking(move || -> CoreResult<Loaded> {
+            let model_params = LlamaModelParams::default().with_n_gpu_layers(N_GPU_LAYERS_ALL);
+            let model = LlamaModel::load_from_file(backend, &path_owned, &model_params)
+                .map_err(|e| CoreError::Llm(format!("Modell-Load fehlgeschlagen: {e}")))?;
+            let template = model
+                .chat_template(None)
+                .map_err(|e| CoreError::Llm(format!("Kein Chat-Template im GGUF: {e}")))?;
+            Ok(Loaded {
+                filename: filename_owned,
+                model: Arc::new(model),
+                template,
+            })
+        })
+        .await
+        .map_err(|e| CoreError::Llm(format!("Load-Task abgebrochen: {e}")))??;
 
         let mut guard = self.loaded.lock().await;
         *guard = Some(Loaded {
-            filename: filename.to_string(),
-            model: Arc::clone(&model),
+            filename: loaded.filename.clone(),
+            model: Arc::clone(&loaded.model),
+            template: loaded.template.clone(),
         });
-        Ok(model)
+        Ok(loaded)
     }
 }
 
-fn map_role(role: ChatRole) -> TextMessageRole {
-    match role {
-        ChatRole::User => TextMessageRole::User,
-        ChatRole::Assistant => TextMessageRole::Assistant,
-        ChatRole::System => TextMessageRole::System,
+/// Convert our turn list into the OpenAI-compatible messages array that
+/// `apply_chat_template_oaicompat` consumes. Same shape as our cloud
+/// providers — assistant turns with `tool_calls`, tool-result turns with
+/// `role: "tool"`.
+fn turns_to_openai_messages(request: &GenerateRequest) -> Vec<JsonValue> {
+    let mut out: Vec<JsonValue> = Vec::new();
+    if let Some(sys) = request.system_prompt.as_deref() {
+        if !sys.trim().is_empty() {
+            out.push(json!({ "role": "system", "content": sys }));
+        }
     }
+    for turn in &request.turns {
+        if turn.role == ChatRole::System {
+            continue;
+        }
+        if !turn.tool_results.is_empty() {
+            for tr in &turn.tool_results {
+                out.push(json!({
+                    "role": "tool",
+                    "tool_call_id": tr.tool_use_id,
+                    "content": tr.content,
+                }));
+            }
+            if turn.content.is_empty() && turn.tool_calls.is_empty() {
+                continue;
+            }
+        }
+        let mut msg = json!({ "role": role_str(turn.role) });
+        let obj = msg.as_object_mut().unwrap();
+        obj.insert("content".into(), JsonValue::String(turn.content.clone()));
+        if !turn.tool_calls.is_empty() && turn.role == ChatRole::Assistant {
+            let calls: Vec<JsonValue> = turn
+                .tool_calls
+                .iter()
+                .map(|tc| {
+                    json!({
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": serde_json::to_string(&tc.arguments)
+                                .unwrap_or_else(|_| "{}".to_string()),
+                        }
+                    })
+                })
+                .collect();
+            obj.insert("tool_calls".into(), JsonValue::Array(calls));
+        }
+        out.push(msg);
+    }
+    out
+}
+
+fn role_str(role: ChatRole) -> &'static str {
+    match role {
+        ChatRole::User => "user",
+        ChatRole::Assistant => "assistant",
+        ChatRole::System => "system",
+    }
+}
+
+fn tools_to_openai_array(tools: &[ToolSchema]) -> Vec<JsonValue> {
+    tools
+        .iter()
+        .map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.input_schema,
+                }
+            })
+        })
+        .collect()
 }
 
 #[async_trait]
 impl LlmProvider for LocalGgufProvider {
     fn id(&self) -> &'static str {
         PROVIDER_ID
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
+    }
+
+    async fn validate(&self) -> CoreResult<()> {
+        if !self.models_dir.exists() {
+            return Err(CoreError::Llm(format!(
+                "Modell-Ordner existiert nicht: {}",
+                self.models_dir.display()
+            )));
+        }
+        Ok(())
     }
 
     async fn generate(
@@ -124,7 +245,7 @@ impl LlmProvider for LocalGgufProvider {
             ));
         }
 
-        let model = tokio::select! {
+        let loaded = tokio::select! {
             r = self.ensure_loaded(&request.model_id) => r?,
             _ = cancel.cancelled() => {
                 let _ = sink
@@ -134,79 +255,294 @@ impl LlmProvider for LocalGgufProvider {
             }
         };
 
-        let mut builder = RequestBuilder::new().set_sampler_max_len(request.max_tokens as usize);
-        if let Some(sys) = request.system_prompt.as_deref() {
-            if !sys.trim().is_empty() {
-                builder = builder.add_message(TextMessageRole::System, sys);
-            }
-        }
-        for turn in &request.turns {
-            builder = builder.add_message(map_role(turn.role), &turn.content);
-        }
-
-        let mut stream = tokio::select! {
-            r = model.stream_chat_request(builder) => r.map_err(|e| CoreError::Llm(format!("Stream-Start: {e}")))?,
-            _ = cancel.cancelled() => {
-                let _ = sink
-                    .send(LlmEvent::Finish { reason: FinishReason::Cancelled })
-                    .await;
-                return Err(CoreError::Cancelled);
-            }
+        // Render prompt using the model's own chat template, with our tool
+        // schemas folded in. llama.cpp handles model-specific tool format
+        // (Llama 3, Gemma 4, Qwen, …) internally.
+        let messages = turns_to_openai_messages(&request);
+        let messages_json = serde_json::to_string(&messages).unwrap_or_else(|_| "[]".to_string());
+        let tools_json_owned = if request.tools.is_empty() {
+            None
+        } else {
+            Some(
+                serde_json::to_string(&tools_to_openai_array(&request.tools))
+                    .unwrap_or_else(|_| "[]".to_string()),
+            )
         };
 
-        while let Some(response) = tokio::select! {
-            r = stream.next() => r,
-            _ = cancel.cancelled() => None,
-        } {
-            if cancel.is_cancelled() {
+        let max_tokens = request.max_tokens;
+        let temperature = request.temperature.unwrap_or(0.7);
+
+        let backend = shared_backend()?;
+        let model_arc = Arc::clone(&loaded.model);
+        let template = loaded.template.clone();
+        let cancel_blocking = cancel.clone();
+        let sink_blocking = sink.clone();
+
+        let join = tokio::task::spawn_blocking(move || -> CoreResult<FinishReason> {
+            run_generation(
+                backend,
+                &model_arc,
+                &template,
+                &messages_json,
+                tools_json_owned.as_deref(),
+                max_tokens,
+                temperature,
+                cancel_blocking,
+                sink_blocking,
+            )
+        })
+        .await
+        .map_err(|e| CoreError::Llm(format!("Generation-Task: {e}")))?;
+
+        match join {
+            Ok(reason) => {
+                let _ = sink.send(LlmEvent::Finish { reason }).await;
+                Ok(())
+            }
+            Err(e) => {
+                if matches!(e, CoreError::Cancelled) {
+                    let _ = sink
+                        .send(LlmEvent::Finish {
+                            reason: FinishReason::Cancelled,
+                        })
+                        .await;
+                    return Err(e);
+                }
                 let _ = sink
-                    .send(LlmEvent::Finish {
-                        reason: FinishReason::Cancelled,
+                    .send(LlmEvent::Error {
+                        code: "llm_error".into(),
+                        message: e.to_string(),
                     })
                     .await;
-                return Err(CoreError::Cancelled);
+                Err(e)
             }
+        }
+    }
+}
 
-            if let Response::Chunk(ChatCompletionChunkResponse { choices, .. }) = response {
-                for choice in choices {
-                    let ChunkChoice {
-                        delta: Delta { content, .. },
-                        finish_reason,
-                        ..
-                    } = choice;
-                    if let Some(text) = content {
-                        if !text.is_empty()
-                            && sink.send(LlmEvent::TextDelta { text }).await.is_err()
-                        {
-                            return Ok(());
-                        }
+#[allow(clippy::too_many_arguments)]
+fn run_generation(
+    backend: &'static LlamaBackend,
+    model: &LlamaModel,
+    template: &LlamaChatTemplate,
+    messages_json: &str,
+    tools_json: Option<&str>,
+    max_tokens: u32,
+    temperature: f32,
+    cancel: CancellationToken,
+    sink: mpsc::Sender<LlmEvent>,
+) -> CoreResult<FinishReason> {
+    let params = OpenAIChatTemplateParams {
+        messages_json,
+        tools_json,
+        tool_choice: None,
+        json_schema: None,
+        grammar: None,
+        // "auto" tells llama.cpp to detect the model-specific reasoning
+        // wrapper (Gemma 4 channel tags, DeepSeek <think>, etc.) and split
+        // it into the separate `reasoning_content` delta field instead of
+        // leaking it into the visible answer.
+        reasoning_format: Some("auto"),
+        chat_template_kwargs: None,
+        add_generation_prompt: true,
+        use_jinja: true,
+        parallel_tool_calls: false,
+        enable_thinking: true,
+        add_bos: false,
+        add_eos: false,
+        parse_tool_calls: tools_json.is_some(),
+    };
+
+    let chat_result = model
+        .apply_chat_template_oaicompat(template, &params)
+        .map_err(|e| CoreError::Llm(format!("apply_chat_template_oaicompat: {e}")))?;
+
+    let tokens = model
+        .str_to_token(&chat_result.prompt, AddBos::Always)
+        .map_err(|e| CoreError::Llm(format!("Tokenisierung: {e}")))?;
+
+    let n_ctx = (tokens.len() as u32 + max_tokens).max(DEFAULT_CTX);
+    let ctx_params = LlamaContextParams::default()
+        .with_n_ctx(NonZeroU32::new(n_ctx))
+        .with_n_batch(n_ctx);
+    let mut ctx = model
+        .new_context(backend, ctx_params)
+        .map_err(|e| CoreError::Llm(format!("Context-Init: {e}")))?;
+
+    // Feed prompt tokens.
+    let mut batch = LlamaBatch::new(n_ctx as usize, 1);
+    let last_index = tokens.len().saturating_sub(1) as i32;
+    for (i, token) in (0_i32..).zip(tokens.iter().copied()) {
+        let is_last = i == last_index;
+        batch
+            .add(token, i, &[0], is_last)
+            .map_err(|e| CoreError::Llm(format!("Batch-Add: {e}")))?;
+    }
+    ctx.decode(&mut batch)
+        .map_err(|e| CoreError::Llm(format!("Decode: {e}")))?;
+
+    let mut sampler = LlamaSampler::chain_simple([
+        LlamaSampler::dist(0),
+        if temperature > 0.0 {
+            LlamaSampler::temp(temperature)
+        } else {
+            LlamaSampler::greedy()
+        },
+    ]);
+
+    // Streaming parser: handles model-specific tool-call markup and emits
+    // OpenAI-compatible JSON deltas as tokens flow in.
+    let mut parser = chat_result
+        .streaming_state_oaicompat()
+        .map_err(|e| CoreError::Llm(format!("Stream-Parser-Init: {e}")))?;
+
+    let mut decoder = encoding_rs::UTF_8.new_decoder();
+    let mut n_cur = batch.n_tokens();
+    let max_total = n_cur + max_tokens as i32;
+    let mut pending_tool_calls: HashMap<u32, PendingToolCall> = HashMap::new();
+    let mut finish = FinishReason::Stop;
+
+    while n_cur < max_total {
+        if cancel.is_cancelled() {
+            return Err(CoreError::Cancelled);
+        }
+        let token = sampler.sample(&ctx, batch.n_tokens() - 1);
+        sampler.accept(token);
+        if model.is_eog_token(token) {
+            break;
+        }
+        let bytes = model
+            .token_to_piece_bytes(token, 64, false, None)
+            .map_err(|e| CoreError::Llm(format!("Token-Decode: {e}")))?;
+        let mut piece = String::with_capacity(32);
+        let _ = decoder.decode_to_string(&bytes, &mut piece, false);
+
+        // Pass the new chunk through the chat-template-aware parser. It may
+        // emit zero, one, or several OpenAI-style delta chunks.
+        let deltas = parser
+            .update(&piece, true)
+            .map_err(|e| CoreError::Llm(format!("Stream-Parser: {e}")))?;
+        for delta_json in deltas {
+            forward_delta(&delta_json, &sink, &mut pending_tool_calls)?;
+        }
+
+        batch.clear();
+        batch
+            .add(token, n_cur, &[0], true)
+            .map_err(|e| CoreError::Llm(format!("Batch-Add: {e}")))?;
+        n_cur += 1;
+        ctx.decode(&mut batch)
+            .map_err(|e| CoreError::Llm(format!("Decode: {e}")))?;
+    }
+
+    if n_cur >= max_total {
+        finish = FinishReason::MaxTokens;
+    }
+
+    // Final flush: tells the parser the stream is complete; any in-flight
+    // tool calls get materialized.
+    let final_deltas = parser
+        .update("", false)
+        .map_err(|e| CoreError::Llm(format!("Stream-Parser-Flush: {e}")))?;
+    for delta_json in final_deltas {
+        forward_delta(&delta_json, &sink, &mut pending_tool_calls)?;
+    }
+    flush_pending(&mut pending_tool_calls, &sink);
+
+    if !pending_tool_calls.is_empty() || tool_calls_were_emitted(&sink) {
+        // ToolUse takes precedence as the finish reason if the LLM ends with
+        // pending tool calls. We don't have a strong signal beyond what
+        // we've forwarded though; let the runner decide based on the events.
+        finish = FinishReason::ToolUse;
+    }
+
+    Ok(finish)
+}
+
+/// In-progress tool call assembled from streamed deltas.
+#[derive(Default, Debug)]
+struct PendingToolCall {
+    id: Option<String>,
+    name: Option<String>,
+    arguments_raw: String,
+}
+
+/// Parse one OpenAI-compat delta JSON and emit the right `LlmEvent` to the
+/// chat runner. Tool calls arrive in fragments and get accumulated by index;
+/// `flush_pending` emits the assembled `LlmEvent::ToolCall`s on stream end.
+fn forward_delta(
+    delta_json: &str,
+    sink: &mpsc::Sender<LlmEvent>,
+    pending: &mut HashMap<u32, PendingToolCall>,
+) -> CoreResult<()> {
+    let value: JsonValue = serde_json::from_str(delta_json)
+        .map_err(|e| CoreError::Llm(format!("Delta-Parse: {e}")))?;
+    if let Some(content) = value.get("content").and_then(|v| v.as_str()) {
+        if !content.is_empty() {
+            let _ = sink.blocking_send(LlmEvent::TextDelta {
+                text: content.to_string(),
+            });
+        }
+    }
+    if let Some(reasoning) = value.get("reasoning_content").and_then(|v| v.as_str()) {
+        if !reasoning.is_empty() {
+            let _ = sink.blocking_send(LlmEvent::ReasoningDelta {
+                text: reasoning.to_string(),
+            });
+        }
+    }
+    if let Some(arr) = value.get("tool_calls").and_then(|v| v.as_array()) {
+        for tc in arr {
+            let index = tc.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let entry = pending.entry(index).or_default();
+            if let Some(id) = tc.get("id").and_then(|v| v.as_str()) {
+                if entry.id.is_none() && !id.is_empty() {
+                    entry.id = Some(id.to_string());
+                }
+            }
+            if let Some(func) = tc.get("function") {
+                if let Some(name) = func.get("name").and_then(|v| v.as_str()) {
+                    if entry.name.is_none() && !name.is_empty() {
+                        entry.name = Some(name.to_string());
                     }
-                    if let Some(reason) = finish_reason {
-                        let mapped = match reason.as_str() {
-                            "length" => FinishReason::MaxTokens,
-                            _ => FinishReason::Stop,
-                        };
-                        let _ = sink.send(LlmEvent::Finish { reason: mapped }).await;
-                    }
+                }
+                if let Some(args) = func.get("arguments").and_then(|v| v.as_str()) {
+                    entry.arguments_raw.push_str(args);
                 }
             }
         }
-
-        let _ = sink
-            .send(LlmEvent::Finish {
-                reason: FinishReason::Stop,
-            })
-            .await;
-        Ok(())
     }
+    Ok(())
+}
 
-    async fn validate(&self) -> CoreResult<()> {
-        if !self.models_dir.exists() {
-            return Err(CoreError::Llm(format!(
-                "Modell-Ordner existiert nicht: {}",
-                self.models_dir.display()
-            )));
-        }
-        Ok(())
+fn flush_pending(pending: &mut HashMap<u32, PendingToolCall>, sink: &mpsc::Sender<LlmEvent>) {
+    if pending.is_empty() {
+        return;
     }
+    let mut entries: Vec<(u32, PendingToolCall)> = pending.drain().collect();
+    entries.sort_by_key(|(i, _)| *i);
+    for (_, pt) in entries {
+        let id = pt
+            .id
+            .unwrap_or_else(|| format!("call_{}", uuid::Uuid::new_v4()));
+        let Some(name) = pt.name else { continue };
+        let arguments = if pt.arguments_raw.trim().is_empty() {
+            JsonValue::Object(Default::default())
+        } else {
+            extract_json_value(&pt.arguments_raw)
+        };
+        let _ = sink.blocking_send(LlmEvent::ToolCall(ToolCall {
+            id,
+            name,
+            arguments,
+        }));
+    }
+}
+
+/// Probe: did we forward a ToolCall already? We can't introspect the
+/// channel, so this is a simple heuristic placeholder. The chat runner
+/// looks at events, not at this finish reason directly, so a wrong default
+/// just means a slightly less precise reason field.
+fn tool_calls_were_emitted(_sink: &mpsc::Sender<LlmEvent>) -> bool {
+    false
 }

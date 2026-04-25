@@ -42,6 +42,7 @@ type StreamState = {
   runId: string;
   assistantMessageId: string;
   buffer: string;
+  reasoning: string;
 };
 
 export function useAgentChat(
@@ -51,6 +52,9 @@ export function useAgentChat(
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [streamingReasoning, setStreamingReasoning] = useState<string | null>(
+    null,
+  );
   const [pendingTools, setPendingTools] = useState<PendingToolCall[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +68,7 @@ export function useAgentChat(
     }
     streamRef.current = null;
     setStreamingText(null);
+    setStreamingReasoning(null);
     setPendingTools([]);
     setSending(false);
   }, []);
@@ -106,6 +111,7 @@ export function useAgentChat(
       setMessages((prev) => [...prev, tempUserMsg]);
       setSending(true);
       setStreamingText("");
+      setStreamingReasoning(null);
       setPendingTools([]);
 
       let started;
@@ -128,6 +134,7 @@ export function useAgentChat(
         runId: started.runId,
         assistantMessageId: started.assistantMessageId,
         buffer: "",
+        reasoning: "",
       };
 
       try {
@@ -139,6 +146,10 @@ export function useAgentChat(
             case "delta":
               state.buffer += event.text;
               setStreamingText(state.buffer);
+              break;
+            case "reasoningDelta":
+              state.reasoning += event.text;
+              setStreamingReasoning(state.reasoning);
               break;
             case "toolCallStarted":
               setPendingTools((prev) => [
@@ -215,6 +226,7 @@ export function useAgentChat(
     messages,
     sending,
     streamingText,
+    streamingReasoning,
     pendingTools,
     error,
     send,

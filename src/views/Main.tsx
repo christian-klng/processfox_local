@@ -19,6 +19,7 @@ type Props = {
   selectedFile: { path: string; name: string } | null;
   messages: ChatMessage[];
   streamingText: string | null;
+  streamingReasoning: string | null;
   pendingTools: PendingToolCall[];
   sending: boolean;
   chatError: string | null;
@@ -43,6 +44,7 @@ export function Main({
   selectedFile,
   messages,
   streamingText,
+  streamingReasoning,
   pendingTools,
   sending,
   chatError,
@@ -109,6 +111,7 @@ export function Main({
         <ChatPane
           messages={messages}
           streamingText={streamingText}
+          streamingReasoning={streamingReasoning}
           pendingTools={pendingTools}
           sending={sending}
           error={chatError}
