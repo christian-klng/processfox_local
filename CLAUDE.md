@@ -6,6 +6,7 @@ Dieses Dokument richtet sich an Claude Code (und an alle anderen LLM-gestützten
 - [`CONCEPT.md`](CONCEPT.md) — vollständige Produkt-Vision und Architektur
 - [`docs/architecture.md`](docs/architecture.md) — technische Architekturskizze
 - [`docs/roadmap.md`](docs/roadmap.md) — aktuelle Phase
+- [`LLM_COMPATIBILITY.md`](LLM_COMPATIBILITY.md) — welche lokalen Modelle ProcessFox laden kann und welche Anforderungen sie erfüllen müssen (Format, Architektur, Chat-Template, Tool-Calling). Konsultieren bevor du Modelle in den Catalog aufnimmst oder Custom-URL-Empfehlungen formulierst.
 - Die relevante `docs/skills/<skill>.md`, wenn du an einem Skill arbeitest
 
 ## 1. Projekt-Kurzprofil
