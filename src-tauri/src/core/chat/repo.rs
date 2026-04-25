@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::error::CoreResult;
+use crate::core::llm::{ToolCall, ToolResult};
 use crate::core::storage::AppPaths;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -24,6 +25,13 @@ pub struct ChatMessage {
     pub role: MessageRole,
     pub content: String,
     pub created_at: String,
+    /// Tool invocations the assistant requested, paired with any tool
+    /// results that followed. Empty for user/system messages and for
+    /// assistant messages that didn't use tools.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_results: Vec<ToolResult>,
 }
 
 impl ChatMessage {
@@ -33,6 +41,8 @@ impl ChatMessage {
             role,
             content: content.into(),
             created_at: Utc::now().to_rfc3339(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
         }
     }
 }

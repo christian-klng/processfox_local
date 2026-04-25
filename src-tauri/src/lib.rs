@@ -12,7 +12,12 @@ use crate::core::llm::{
     openrouter::OpenRouterProvider, ProviderRegistry,
 };
 use crate::core::models::ModelCatalog;
+use crate::core::skill::SkillRegistry;
 use crate::core::storage::AppPaths;
+use crate::core::tool::{
+    tools::{GrepInFilesTool, ListFolderTool, ReadFileTool},
+    ToolRegistry,
+};
 use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -43,7 +48,16 @@ pub fn run() {
             let catalog = ModelCatalog::embedded()?;
             tracing::info!(models = catalog.models.len(), "model catalog loaded");
 
-            app.manage(AppState::new(paths, registry, catalog));
+            let mut tools = ToolRegistry::new();
+            tools.register(Arc::new(ListFolderTool));
+            tools.register(Arc::new(ReadFileTool));
+            tools.register(Arc::new(GrepInFilesTool));
+            tracing::info!(tools = tools.names().len(), "tool registry ready");
+
+            let skills = SkillRegistry::load_builtin()?;
+            tracing::info!(skills = skills.all().len(), "skill registry loaded");
+
+            app.manage(AppState::new(paths, registry, catalog, tools, skills));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -72,6 +86,7 @@ pub fn run() {
             commands::models::download_from_url,
             commands::models::cancel_download,
             commands::models::delete_model,
+            commands::skill::list_skills,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

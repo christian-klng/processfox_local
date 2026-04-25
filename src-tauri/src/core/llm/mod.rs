@@ -7,19 +7,48 @@ pub mod registry;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use super::error::CoreResult;
+use super::tool::ToolSchema;
 
 pub use registry::{ProviderId, ProviderRegistry};
 
-/// A single turn in the conversation, as sent to the LLM.
+/// A single turn in the conversation, as sent to the LLM. Most turns carry
+/// only text content; assistant turns that invoked tools also carry
+/// `tool_calls`, and the following user turn carries matching `tool_results`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatTurn {
     pub role: ChatRole,
+    #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ToolCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_results: Vec<ToolResult>,
+}
+
+impl ChatTurn {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::User,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+        }
+    }
+
+    pub fn assistant(content: impl Into<String>) -> Self {
+        Self {
+            role: ChatRole::Assistant,
+            content: content.into(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -30,11 +59,31 @@ pub enum ChatRole {
     System,
 }
 
+/// A model's request to invoke a specific tool with structured arguments.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: JsonValue,
+}
+
+/// The outcome of executing a tool, paired to a prior `ToolCall` by `tool_use_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolResult {
+    pub tool_use_id: String,
+    pub content: String,
+    #[serde(default)]
+    pub is_error: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct GenerateRequest {
     pub model_id: String,
     pub system_prompt: Option<String>,
     pub turns: Vec<ChatTurn>,
+    pub tools: Vec<ToolSchema>,
     pub max_tokens: u32,
     pub temperature: Option<f32>,
 }
@@ -44,15 +93,17 @@ pub struct GenerateRequest {
 #[serde(rename_all = "camelCase", tag = "type")]
 pub enum LlmEvent {
     TextDelta { text: String },
+    ToolCall(ToolCall),
     Finish { reason: FinishReason },
     Error { code: String, message: String },
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FinishReason {
     Stop,
     MaxTokens,
+    ToolUse,
     Cancelled,
     Error,
 }
@@ -77,4 +128,12 @@ pub trait LlmProvider: Send + Sync + std::fmt::Debug {
     /// request to the provider (e.g. listing models). Returns Ok(()) on
     /// success, a descriptive `CoreError` otherwise.
     async fn validate(&self) -> CoreResult<()>;
+
+    /// Whether this provider can use `GenerateRequest::tools`. Providers
+    /// without tool-calling support should return false, and the ReAct loop
+    /// will not hand them any tools. Defaults to false so adding tools to
+    /// the trait is backward compatible.
+    fn supports_tools(&self) -> bool {
+        false
+    }
 }

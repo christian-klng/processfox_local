@@ -11,6 +11,7 @@ import type {
   InstalledModel,
 } from "@/types/models";
 import type { Settings } from "@/types/settings";
+import type { Skill } from "@/types/skill";
 
 export const agentApi = {
   list: () => invoke<Agent[]>("list_agents"),
@@ -50,6 +51,10 @@ export const secretsApi = {
     invoke<void>("clear_api_key", { provider }),
   validateApiKey: (provider: string) =>
     invoke<ValidationResult>("validate_api_key", { provider }),
+};
+
+export const skillsApi = {
+  list: () => invoke<Skill[]>("list_skills"),
 };
 
 export const modelsApi = {

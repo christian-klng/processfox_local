@@ -8,8 +8,10 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import type { PendingToolCall } from "@/hooks/useAgentChat";
 import type { Agent } from "@/types/agent";
 import type { ChatMessage } from "@/types/chat";
+import type { Skill } from "@/types/skill";
 
 type Props = {
   agents: Agent[];
@@ -17,10 +19,12 @@ type Props = {
   selectedFile: { path: string; name: string } | null;
   messages: ChatMessage[];
   streamingText: string | null;
+  pendingTools: PendingToolCall[];
   sending: boolean;
   chatError: string | null;
   chatDisabled: boolean;
   chatDisabledReason: string | undefined;
+  skills: Skill[];
   onSelectAgent: (agent: Agent) => void;
   onCreateAgent: () => void;
   onEditAgent: () => void;
@@ -38,10 +42,12 @@ export function Main({
   selectedFile,
   messages,
   streamingText,
+  pendingTools,
   sending,
   chatError,
   chatDisabled,
   chatDisabledReason,
+  skills,
   onSelectAgent,
   onCreateAgent,
   onEditAgent,
@@ -69,7 +75,7 @@ export function Main({
             onEdit={onEditAgent}
             onOpenSettings={onOpenSettings}
           />
-          <SkillIconRow skills={activeAgent?.skills ?? []} />
+          <SkillIconRow activeSkillNames={activeAgent?.skills ?? []} skills={skills} />
           <div className="flex-1 overflow-hidden border-t border-border">
             <FileTree
               agentId={activeAgent?.id ?? null}
@@ -100,6 +106,7 @@ export function Main({
         <ChatPane
           messages={messages}
           streamingText={streamingText}
+          pendingTools={pendingTools}
           sending={sending}
           error={chatError}
           disabled={chatDisabled}

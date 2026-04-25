@@ -30,17 +30,18 @@ export function resolveAgentModel(
   return { provider, modelId };
 }
 
+export type PendingToolCall = {
+  id: string;
+  name: string;
+  arguments: unknown;
+  status: "running" | "done" | "error";
+  content?: string;
+};
+
 type StreamState = {
   runId: string;
   assistantMessageId: string;
   buffer: string;
-};
-
-export type ChatState = {
-  messages: ChatMessage[];
-  sending: boolean;
-  streamingText: string | null;
-  error: string | null;
 };
 
 export function useAgentChat(
@@ -50,6 +51,7 @@ export function useAgentChat(
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [pendingTools, setPendingTools] = useState<PendingToolCall[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const streamRef = useRef<StreamState | null>(null);
@@ -62,6 +64,7 @@ export function useAgentChat(
     }
     streamRef.current = null;
     setStreamingText(null);
+    setPendingTools([]);
     setSending(false);
   }, []);
 
@@ -80,7 +83,8 @@ export function useAgentChat(
         if (!cancelled) setMessages(msgs);
       })
       .catch((e) => {
-        if (!cancelled) setError(String((e as { message?: string })?.message ?? e));
+        if (!cancelled)
+          setError(String((e as { message?: string })?.message ?? e));
       });
     return () => {
       cancelled = true;
@@ -92,7 +96,6 @@ export function useAgentChat(
       if (!agent || !effectiveModel || sending) return;
       setError(null);
 
-      // Optimistic user bubble.
       const tempUserId = crypto.randomUUID();
       const tempUserMsg: ChatMessage = {
         id: tempUserId,
@@ -103,6 +106,7 @@ export function useAgentChat(
       setMessages((prev) => [...prev, tempUserMsg]);
       setSending(true);
       setStreamingText("");
+      setPendingTools([]);
 
       let started;
       try {
@@ -130,35 +134,56 @@ export function useAgentChat(
         const unlisten = await chatApi.subscribeRun(started.runId, (event) => {
           const state = streamRef.current;
           if (!state || state.runId !== started.runId) return;
-          if (event.type === "delta") {
-            state.buffer += event.text;
-            setStreamingText(state.buffer);
-          } else if (event.type === "finish") {
-            // The backend persisted the final message with `event.message`.
-            // Replace our optimistic user bubble id reconciliation: the
-            // backend also persisted the user message with a different id,
-            // so refresh from disk for consistency.
-            setMessages((prev) => {
-              const withoutTempUser = prev.filter((m) => m.id !== tempUserId);
-              return [...withoutTempUser];
-            });
-            // Append the assistant message.
-            setMessages((prev) => [...prev, event.message]);
-            // Refresh history to replace temp user msg with the persisted one.
-            chatApi
-              .listMessages(agent.id)
-              .then(setMessages)
-              .catch(() => {});
-            resetStream();
-          } else if (event.type === "error") {
-            setError(`${event.code}: ${event.message}`);
-            setMessages((prev) => prev.filter((m) => m.id !== tempUserId));
-            // Re-sync with backend to get the persisted user message.
-            chatApi
-              .listMessages(agent.id)
-              .then(setMessages)
-              .catch(() => {});
-            resetStream();
+
+          switch (event.type) {
+            case "delta":
+              state.buffer += event.text;
+              setStreamingText(state.buffer);
+              break;
+            case "toolCallStarted":
+              setPendingTools((prev) => [
+                ...prev,
+                {
+                  id: event.id,
+                  name: event.name,
+                  arguments: event.arguments,
+                  status: "running",
+                },
+              ]);
+              // A new tool call starts the next LLM iteration from a clean
+              // text slate; drop the accumulated streaming text so chips
+              // group visually with their request.
+              state.buffer = "";
+              setStreamingText("");
+              break;
+            case "toolCallCompleted":
+              setPendingTools((prev) =>
+                prev.map((t) =>
+                  t.id === event.id
+                    ? {
+                        ...t,
+                        status: event.isError ? "error" : "done",
+                        content: event.content,
+                      }
+                    : t,
+                ),
+              );
+              break;
+            case "finish":
+              chatApi
+                .listMessages(agent.id)
+                .then(setMessages)
+                .catch(() => {});
+              resetStream();
+              break;
+            case "error":
+              setError(`${event.code}: ${event.message}`);
+              chatApi
+                .listMessages(agent.id)
+                .then(setMessages)
+                .catch(() => {});
+              resetStream();
+              break;
           }
         });
         unlistenRef.current = unlisten;
@@ -180,7 +205,6 @@ export function useAgentChat(
     }
   }, []);
 
-  // Unsubscribe on unmount.
   useEffect(() => {
     return () => {
       if (unlistenRef.current) unlistenRef.current();
@@ -191,6 +215,7 @@ export function useAgentChat(
     messages,
     sending,
     streamingText,
+    pendingTools,
     error,
     send,
     cancel,

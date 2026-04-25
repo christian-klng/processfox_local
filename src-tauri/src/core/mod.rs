@@ -7,5 +7,7 @@ pub mod models;
 pub mod sandbox;
 pub mod secrets;
 pub mod settings;
+pub mod skill;
 pub mod storage;
+pub mod tool;
 pub mod types;

@@ -13,10 +13,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { agentApi, modelsApi, settingsApi } from "@/lib/tauri";
+import { agentApi, modelsApi, settingsApi, skillsApi } from "@/lib/tauri";
 import type { Agent, ModelRef } from "@/types/agent";
 import type { InstalledModel } from "@/types/models";
 import type { Settings } from "@/types/settings";
+import type { Skill } from "@/types/skill";
 
 type Props = {
   open: boolean;
@@ -70,6 +71,8 @@ export function AgentEditorDialog({
   const [selection, setSelection] = useState<ModelSelection>({ kind: "inherit" });
   const [settings, setSettings] = useState<Settings | null>(null);
   const [installed, setInstalled] = useState<InstalledModel[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
+  const [activeSkills, setActiveSkills] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -77,18 +80,21 @@ export function AgentEditorDialog({
     if (!isOpen) return;
     settingsApi.get().then(setSettings).catch(console.error);
     modelsApi.listInstalled().then(setInstalled).catch(console.error);
+    skillsApi.list().then(setAvailableSkills).catch(console.error);
     if (mode === "edit" && agent) {
       setName(agent.name);
       setIcon(agent.icon);
       setFolder(agent.folder);
       setSystemPrompt(agent.systemPrompt);
       setSelection(modelRefToSelection(agent.model));
+      setActiveSkills(agent.skills);
     } else {
       setName("");
       setIcon("🦊");
       setFolder(null);
       setSystemPrompt("");
       setSelection({ kind: "inherit" });
+      setActiveSkills([]);
     }
     setError(null);
   }, [isOpen, mode, agent]);
@@ -115,7 +121,7 @@ export function AgentEditorDialog({
               folder: folder ?? undefined,
               systemPrompt,
               model,
-              skills: [],
+              skills: activeSkills,
             })
           : await agentApi.update(agent!.id, {
               name: name.trim(),
@@ -123,6 +129,7 @@ export function AgentEditorDialog({
               folder: folder ?? undefined,
               systemPrompt,
               model,
+              skills: activeSkills,
             });
       onSaved(saved);
       onClose();
@@ -326,9 +333,48 @@ export function AgentEditorDialog({
 
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">Skills</Label>
-            <div className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              Skills erscheinen hier ab Phase 3.
-            </div>
+            {availableSkills.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                Keine Skills verfügbar.
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1 rounded-md border border-border bg-background p-2">
+                {availableSkills.map((s) => {
+                  const checked = activeSkills.includes(s.name);
+                  return (
+                    <label
+                      key={s.name}
+                      className="flex cursor-pointer items-start gap-2 rounded-sm px-1.5 py-1 hover:bg-accent/40"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) =>
+                          setActiveSkills((prev) =>
+                            e.target.checked
+                              ? [...prev, s.name]
+                              : prev.filter((n) => n !== s.name),
+                          )
+                        }
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 text-xs font-medium">
+                          <span>{s.icon ?? "🔧"}</span>
+                          <span>{s.title}</span>
+                          <span className="font-mono text-[10px] text-muted-foreground">
+                            {s.name}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
+                          {s.description}
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {error && (

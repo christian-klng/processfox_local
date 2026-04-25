@@ -60,6 +60,8 @@ keyring = { version = "3", features = [
 ] }
 
 sysinfo = "0.33"
+regex = "1"
+include_dir = "0.7"
 
 # Local GGUF runtime. On macOS we enable Metal for GPU acceleration (requires
 # full Xcode + `MetalToolchain` via `sudo xcodebuild -downloadComponent

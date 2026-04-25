@@ -11,14 +11,18 @@ use super::repo::{ChatMessage, ChatRepo, MessageRole};
 use crate::core::agent::Agent;
 use crate::core::error::{CoreError, CoreResult};
 use crate::core::llm::{
-    ChatRole, ChatTurn, FinishReason, GenerateRequest, LlmEvent, ProviderRegistry,
+    ChatRole, ChatTurn, FinishReason, GenerateRequest, LlmEvent, ProviderRegistry, ToolCall,
+    ToolResult,
 };
+use crate::core::skill::SkillRegistry;
+use crate::core::tool::{ToolContext, ToolRegistry, ToolSchema};
 
 pub type RunId = String;
 
 /// Max number of prior messages included when prompting the model.
 const HISTORY_WINDOW: usize = 20;
 const DEFAULT_MAX_TOKENS: u32 = 4096;
+const MAX_REACT_ITERATIONS: u32 = 12;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,6 +36,16 @@ pub struct RunStarted {
 pub enum RunEvent {
     Delta {
         text: String,
+    },
+    ToolCallStarted {
+        id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallCompleted {
+        id: String,
+        content: String,
+        is_error: bool,
     },
     Finish {
         reason: String,
@@ -53,21 +67,32 @@ pub struct ChatRunner {
     app: AppHandle,
     repo: ChatRepo,
     registry: ProviderRegistry,
+    tools: ToolRegistry,
+    skills: SkillRegistry,
     active: Arc<Mutex<HashMap<RunId, ChatRunHandle>>>,
 }
 
 impl ChatRunner {
-    pub fn new(app: AppHandle, repo: ChatRepo, registry: ProviderRegistry) -> Self {
+    pub fn new(
+        app: AppHandle,
+        repo: ChatRepo,
+        registry: ProviderRegistry,
+        tools: ToolRegistry,
+        skills: SkillRegistry,
+    ) -> Self {
         Self {
             app,
             repo,
             registry,
+            tools,
+            skills,
             active: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// Start a new run: persists the user message, spawns the LLM call, and
-    /// returns the run-id + the assistant-message-id the UI should build up.
+    /// Kick off a ReAct-style run: persist the user message, then loop LLM →
+    /// tool calls → tool results → LLM until the model finishes without
+    /// another tool call (or we hit the iteration cap).
     pub async fn start(
         &self,
         agent: Agent,
@@ -77,40 +102,6 @@ impl ChatRunner {
     ) -> CoreResult<RunStarted> {
         let user_msg = ChatMessage::new(MessageRole::User, user_text.clone());
         self.repo.append(&agent.id, &user_msg)?;
-
-        let mut turns = self
-            .repo
-            .load(&agent.id)?
-            .into_iter()
-            .filter_map(|m| {
-                let role = match m.role {
-                    MessageRole::User => ChatRole::User,
-                    MessageRole::Assistant => ChatRole::Assistant,
-                    _ => return None,
-                };
-                Some(ChatTurn {
-                    role,
-                    content: m.content,
-                })
-            })
-            .collect::<Vec<_>>();
-        if turns.len() > HISTORY_WINDOW {
-            turns.drain(0..turns.len() - HISTORY_WINDOW);
-        }
-
-        let system_prompt = if agent.system_prompt.trim().is_empty() {
-            None
-        } else {
-            Some(agent.system_prompt.clone())
-        };
-
-        let request = GenerateRequest {
-            model_id,
-            system_prompt,
-            turns,
-            max_tokens: DEFAULT_MAX_TOKENS,
-            temperature: None,
-        };
 
         let provider = self.registry.get(&provider_id)?;
         let run_id = Uuid::new_v4().to_string();
@@ -129,81 +120,55 @@ impl ChatRunner {
 
         let app = self.app.clone();
         let repo = self.repo.clone();
+        let tools = self.tools.clone();
+        let skills = self.skills.clone();
         let agent_id = agent.id.clone();
         let run_id_bg = run_id.clone();
         let assistant_id_bg = assistant_id.clone();
         let active = self.active.clone();
 
         tokio::spawn(async move {
-            let (tx, mut rx) = mpsc::channel::<LlmEvent>(64);
-            let cancel_for_provider = cancel.clone();
-            let provider_bg = provider.clone();
+            let channel = format!("chat:run:{run_id_bg}");
 
-            let gen_task = tokio::spawn(async move {
-                provider_bg.generate(request, tx, cancel_for_provider).await
-            });
-
-            let mut buffer = String::new();
-            let mut finish_reason: Option<FinishReason> = None;
-            let mut terminal_error: Option<(String, String)> = None;
-
-            while let Some(event) = rx.recv().await {
-                match event {
-                    LlmEvent::TextDelta { text } => {
-                        buffer.push_str(&text);
-                        let _ =
-                            app.emit(&format!("chat:run:{run_id_bg}"), RunEvent::Delta { text });
-                    }
-                    LlmEvent::Finish { reason } => {
-                        finish_reason = Some(reason);
-                    }
-                    LlmEvent::Error { code, message } => {
-                        terminal_error = Some((code, message));
-                    }
+            match react_loop(
+                &app,
+                &channel,
+                provider,
+                &repo,
+                &tools,
+                &skills,
+                &agent,
+                &model_id,
+                &assistant_id_bg,
+                cancel.clone(),
+            )
+            .await
+            {
+                Ok(final_msg) => {
+                    let _ = app.emit(
+                        &channel,
+                        RunEvent::Finish {
+                            reason: "stop".to_string(),
+                            message: final_msg,
+                        },
+                    );
+                }
+                Err(e) => {
+                    let code = match &e {
+                        CoreError::Cancelled => "cancelled",
+                        _ => "llm_error",
+                    };
+                    let _ = app.emit(
+                        &channel,
+                        RunEvent::Error {
+                            code: code.to_string(),
+                            message: e.to_string(),
+                        },
+                    );
                 }
             }
 
-            // Await the provider task to surface any error the channel didn't carry.
-            let gen_result = gen_task.await;
-
-            let final_reason = finish_reason.unwrap_or(FinishReason::Stop);
-
-            if let Some((code, message)) = terminal_error {
-                let _ = app.emit(
-                    &format!("chat:run:{run_id_bg}"),
-                    RunEvent::Error { code, message },
-                );
-            } else {
-                let assistant_msg = ChatMessage {
-                    id: assistant_id_bg.clone(),
-                    role: MessageRole::Assistant,
-                    content: buffer,
-                    created_at: chrono::Utc::now().to_rfc3339(),
-                };
-
-                // Persist only if we actually produced something OR we weren't
-                // cancelled mid-stream. Cancelled runs still save what we got.
-                if !assistant_msg.content.is_empty() {
-                    if let Err(e) = repo.append(&agent_id, &assistant_msg) {
-                        tracing::warn!(error = %e, "failed to persist assistant message");
-                    }
-                }
-
-                let _ = app.emit(
-                    &format!("chat:run:{run_id_bg}"),
-                    RunEvent::Finish {
-                        reason: reason_str(final_reason).to_string(),
-                        message: assistant_msg,
-                    },
-                );
-            }
-
-            if let Ok(Err(e)) = gen_result {
-                if !matches!(e, CoreError::Cancelled) {
-                    tracing::warn!(error = %e, "provider returned error after stream close");
-                }
-            }
-
+            let _ = agent_id;
             let mut active = active.lock().await;
             active.remove(&run_id_bg);
         });
@@ -222,11 +187,274 @@ impl ChatRunner {
     }
 }
 
-fn reason_str(r: FinishReason) -> &'static str {
-    match r {
-        FinishReason::Stop => "stop",
-        FinishReason::MaxTokens => "max_tokens",
-        FinishReason::Cancelled => "cancelled",
-        FinishReason::Error => "error",
+#[allow(clippy::too_many_arguments)]
+async fn react_loop(
+    app: &AppHandle,
+    channel: &str,
+    provider: Arc<dyn crate::core::llm::LlmProvider>,
+    repo: &ChatRepo,
+    tools: &ToolRegistry,
+    skills: &SkillRegistry,
+    agent: &Agent,
+    model_id: &str,
+    final_msg_id: &str,
+    cancel: CancellationToken,
+) -> CoreResult<ChatMessage> {
+    let agent_folder = agent.folder.clone();
+    let system_prompt = compose_system_prompt(agent, skills);
+    let tool_schemas: Vec<ToolSchema> = if provider.supports_tools() {
+        collect_tool_schemas(agent, skills, tools)
+    } else {
+        Vec::new()
+    };
+
+    // Build initial turn list from persisted history, trimmed to the window.
+    let history = repo.load(&agent.id)?;
+    let mut turns = history_to_turns(&history);
+    if turns.len() > HISTORY_WINDOW {
+        turns.drain(0..turns.len() - HISTORY_WINDOW);
     }
+
+    for _ in 0..MAX_REACT_ITERATIONS {
+        let (text, tool_calls, finish_reason) = run_single_call(
+            app,
+            channel,
+            provider.clone(),
+            &tool_schemas,
+            model_id,
+            system_prompt.clone(),
+            turns.clone(),
+            cancel.clone(),
+        )
+        .await?;
+
+        // Record the assistant turn we just produced, either in-memory for
+        // the next LLM call or (on final iteration) as the persisted message.
+        if tool_calls.is_empty() {
+            let assistant_msg = ChatMessage {
+                id: final_msg_id.to_string(),
+                role: MessageRole::Assistant,
+                content: text.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                tool_calls: Vec::new(),
+                tool_results: Vec::new(),
+            };
+            if !assistant_msg.content.is_empty() {
+                let _ = repo.append(&agent.id, &assistant_msg);
+            }
+            return Ok(assistant_msg);
+        }
+
+        // Assistant asked for tool calls — keep the assistant turn in the
+        // history (text + tool_calls) and append a user turn carrying the
+        // results of each tool call, then loop.
+        turns.push(ChatTurn {
+            role: ChatRole::Assistant,
+            content: text.clone(),
+            tool_calls: tool_calls.clone(),
+            tool_results: Vec::new(),
+        });
+
+        let assistant_persist = ChatMessage {
+            id: Uuid::new_v4().to_string(),
+            role: MessageRole::Assistant,
+            content: text,
+            created_at: chrono::Utc::now().to_rfc3339(),
+            tool_calls: tool_calls.clone(),
+            tool_results: Vec::new(),
+        };
+        let _ = repo.append(&agent.id, &assistant_persist);
+
+        // Execute each tool and collect results.
+        let mut results = Vec::with_capacity(tool_calls.len());
+        for call in &tool_calls {
+            if cancel.is_cancelled() {
+                return Err(CoreError::Cancelled);
+            }
+            let folder = agent_folder.clone().ok_or_else(|| {
+                CoreError::Llm("Agent hat keinen Ordner konfiguriert.".to_string())
+            })?;
+            let ctx = ToolContext {
+                agent_id: agent.id.clone(),
+                agent_folder: folder,
+                app: app.clone(),
+            };
+            let (content, is_error) = match tools.get(&call.name) {
+                Ok(tool) => match tool.execute(call.arguments.clone(), &ctx).await {
+                    Ok(out) => (out.content, false),
+                    Err(e) => (format!("tool error: {e}"), true),
+                },
+                Err(e) => (format!("unknown tool: {e}"), true),
+            };
+            let _ = app.emit(
+                channel,
+                RunEvent::ToolCallCompleted {
+                    id: call.id.clone(),
+                    content: content.clone(),
+                    is_error,
+                },
+            );
+            results.push(ToolResult {
+                tool_use_id: call.id.clone(),
+                content,
+                is_error,
+            });
+        }
+
+        let tool_turn = ChatTurn {
+            role: ChatRole::User,
+            content: String::new(),
+            tool_calls: Vec::new(),
+            tool_results: results.clone(),
+        };
+        turns.push(tool_turn);
+
+        let tool_persist = ChatMessage {
+            id: Uuid::new_v4().to_string(),
+            role: MessageRole::Tool,
+            content: String::new(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            tool_calls: Vec::new(),
+            tool_results: results,
+        };
+        let _ = repo.append(&agent.id, &tool_persist);
+
+        if finish_reason == FinishReason::Stop {
+            // LLM said "stop" even though it also produced tool calls. Feed
+            // the results back in any case and let it continue if needed.
+        }
+    }
+
+    Err(CoreError::Llm(format!(
+        "ReAct-Loop-Limit ({MAX_REACT_ITERATIONS}) erreicht."
+    )))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_single_call(
+    app: &AppHandle,
+    channel: &str,
+    provider: Arc<dyn crate::core::llm::LlmProvider>,
+    tool_schemas: &[ToolSchema],
+    model_id: &str,
+    system_prompt: Option<String>,
+    turns: Vec<ChatTurn>,
+    cancel: CancellationToken,
+) -> CoreResult<(String, Vec<ToolCall>, FinishReason)> {
+    let (tx, mut rx) = mpsc::channel::<LlmEvent>(64);
+
+    let request = GenerateRequest {
+        model_id: model_id.to_string(),
+        system_prompt,
+        turns,
+        tools: tool_schemas.to_vec(),
+        max_tokens: DEFAULT_MAX_TOKENS,
+        temperature: None,
+    };
+
+    let provider_bg = provider.clone();
+    let cancel_for_provider = cancel.clone();
+    let gen_task =
+        tokio::spawn(async move { provider_bg.generate(request, tx, cancel_for_provider).await });
+
+    let mut buffer = String::new();
+    let mut tool_calls: Vec<ToolCall> = Vec::new();
+    let mut finish_reason: Option<FinishReason> = None;
+    let mut terminal_error: Option<(String, String)> = None;
+
+    while let Some(event) = rx.recv().await {
+        match event {
+            LlmEvent::TextDelta { text } => {
+                buffer.push_str(&text);
+                let _ = app.emit(channel, RunEvent::Delta { text });
+            }
+            LlmEvent::ToolCall(call) => {
+                let _ = app.emit(
+                    channel,
+                    RunEvent::ToolCallStarted {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: call.arguments.clone(),
+                    },
+                );
+                tool_calls.push(call);
+            }
+            LlmEvent::Finish { reason } => {
+                finish_reason = Some(reason);
+            }
+            LlmEvent::Error { code, message } => {
+                terminal_error = Some((code, message));
+            }
+        }
+    }
+
+    let _ = gen_task.await;
+    if let Some((code, message)) = terminal_error {
+        return Err(CoreError::Llm(format!("{code}: {message}")));
+    }
+    Ok((
+        buffer,
+        tool_calls,
+        finish_reason.unwrap_or(FinishReason::Stop),
+    ))
+}
+
+fn compose_system_prompt(agent: &Agent, skills: &SkillRegistry) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if !agent.system_prompt.trim().is_empty() {
+        parts.push(agent.system_prompt.trim().to_string());
+    }
+    for skill_name in &agent.skills {
+        if let Some(skill) = skills.get(skill_name) {
+            let mut block = format!("## Skill: {}\n", skill.title);
+            block.push_str(&skill.description);
+            if !skill.body.trim().is_empty() {
+                block.push_str("\n\n");
+                block.push_str(skill.body.trim());
+            }
+            parts.push(block);
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+fn collect_tool_schemas(
+    agent: &Agent,
+    skills: &SkillRegistry,
+    tools: &ToolRegistry,
+) -> Vec<ToolSchema> {
+    let mut wanted: Vec<String> = Vec::new();
+    for skill_name in &agent.skills {
+        if let Some(skill) = skills.get(skill_name) {
+            for t in &skill.tools {
+                if !wanted.contains(t) {
+                    wanted.push(t.clone());
+                }
+            }
+        }
+    }
+    tools.schemas_for(&wanted)
+}
+
+fn history_to_turns(history: &[ChatMessage]) -> Vec<ChatTurn> {
+    let mut turns = Vec::new();
+    for m in history {
+        let role = match m.role {
+            MessageRole::User => ChatRole::User,
+            MessageRole::Assistant => ChatRole::Assistant,
+            MessageRole::Tool => ChatRole::User,
+            MessageRole::System => continue,
+        };
+        turns.push(ChatTurn {
+            role,
+            content: m.content.clone(),
+            tool_calls: m.tool_calls.clone(),
+            tool_results: m.tool_results.clone(),
+        });
+    }
+    turns
 }

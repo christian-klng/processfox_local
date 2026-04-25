@@ -1,12 +1,16 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use eventsource_stream::Eventsource;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value as JsonValue};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use super::{ChatRole, ChatTurn, FinishReason, GenerateRequest, LlmEvent, LlmProvider};
+use super::{ChatRole, ChatTurn, FinishReason, GenerateRequest, LlmEvent, LlmProvider, ToolCall};
 use crate::core::error::{CoreError, CoreResult};
+use crate::core::tool::ToolSchema;
 
 const API_URL: &str = "https://api.anthropic.com/v1/messages";
 const API_VERSION: &str = "2023-06-01";
@@ -38,28 +42,30 @@ struct Request {
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     system: Option<String>,
-    messages: Vec<WireMessage>,
+    messages: Vec<JsonValue>,
     stream: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
-}
-
-#[derive(Serialize)]
-struct WireMessage {
-    role: &'static str,
-    content: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<JsonValue>,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum StreamEvent {
     MessageStart {},
-    ContentBlockStart {},
+    ContentBlockStart {
+        index: u32,
+        content_block: ContentBlockStartPayload,
+    },
     Ping {},
     ContentBlockDelta {
+        index: u32,
         delta: ContentDelta,
     },
-    ContentBlockStop {},
+    ContentBlockStop {
+        index: u32,
+    },
     MessageDelta {
         delta: MessageDelta,
     },
@@ -73,9 +79,24 @@ enum StreamEvent {
 
 #[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
+enum ContentBlockStartPayload {
+    Text {},
+    ToolUse {
+        id: String,
+        name: String,
+    },
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize, Debug)]
+#[serde(tag = "type", rename_all = "snake_case")]
 enum ContentDelta {
     TextDelta {
         text: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
     },
     #[serde(other)]
     Unknown,
@@ -95,29 +116,79 @@ struct ApiErrorBody {
     message: Option<String>,
 }
 
-fn map_role(role: ChatRole) -> &'static str {
-    match role {
-        ChatRole::User => "user",
-        ChatRole::Assistant => "assistant",
-        ChatRole::System => "user", // fallback — system is sent via top-level `system`
-    }
+/// Partial state of a tool_use content block being streamed in.
+struct PendingToolUse {
+    id: String,
+    name: String,
+    partial_json: String,
 }
 
 fn map_stop_reason(raw: Option<&str>) -> FinishReason {
     match raw {
+        Some("tool_use") => FinishReason::ToolUse,
         Some("end_turn") | Some("stop_sequence") => FinishReason::Stop,
         Some("max_tokens") => FinishReason::MaxTokens,
         _ => FinishReason::Stop,
     }
 }
 
-fn to_wire(turns: &[ChatTurn]) -> Vec<WireMessage> {
-    turns
+fn role_str(role: ChatRole) -> &'static str {
+    match role {
+        ChatRole::User => "user",
+        ChatRole::Assistant => "assistant",
+        ChatRole::System => "user",
+    }
+}
+
+/// Convert our internal turns into Anthropic's message array. Assistant
+/// turns that called tools become `[{text}, {tool_use}]` content arrays;
+/// user turns carrying tool results become `[{tool_result}]` arrays.
+fn to_wire_messages(turns: &[ChatTurn]) -> Vec<JsonValue> {
+    let mut out = Vec::new();
+    for turn in turns {
+        if turn.role == ChatRole::System {
+            continue;
+        }
+        let mut blocks: Vec<JsonValue> = Vec::new();
+        if !turn.content.is_empty() {
+            blocks.push(json!({ "type": "text", "text": turn.content }));
+        }
+        for tc in &turn.tool_calls {
+            blocks.push(json!({
+                "type": "tool_use",
+                "id": tc.id,
+                "name": tc.name,
+                "input": tc.arguments,
+            }));
+        }
+        for tr in &turn.tool_results {
+            blocks.push(json!({
+                "type": "tool_result",
+                "tool_use_id": tr.tool_use_id,
+                "content": tr.content,
+                "is_error": tr.is_error,
+            }));
+        }
+        if blocks.is_empty() {
+            continue;
+        }
+        out.push(json!({
+            "role": role_str(turn.role),
+            "content": blocks,
+        }));
+    }
+    out
+}
+
+fn tools_to_wire(tools: &[ToolSchema]) -> Vec<JsonValue> {
+    tools
         .iter()
-        .filter(|t| t.role != ChatRole::System) // system prompt goes in a dedicated field
-        .map(|t| WireMessage {
-            role: map_role(t.role),
-            content: t.content.clone(),
+        .map(|t| {
+            json!({
+                "name": t.name,
+                "description": t.description,
+                "input_schema": t.input_schema,
+            })
         })
         .collect()
 }
@@ -126,6 +197,10 @@ fn to_wire(turns: &[ChatTurn]) -> Vec<WireMessage> {
 impl LlmProvider for AnthropicProvider {
     fn id(&self) -> &'static str {
         "anthropic"
+    }
+
+    fn supports_tools(&self) -> bool {
+        true
     }
 
     async fn validate(&self) -> CoreResult<()> {
@@ -166,9 +241,10 @@ impl LlmProvider for AnthropicProvider {
             model: request.model_id.clone(),
             max_tokens: request.max_tokens,
             system: request.system_prompt.clone(),
-            messages: to_wire(&request.turns),
+            messages: to_wire_messages(&request.turns),
             stream: true,
             temperature: request.temperature,
+            tools: tools_to_wire(&request.tools),
         };
 
         let response = tokio::select! {
@@ -201,6 +277,7 @@ impl LlmProvider for AnthropicProvider {
         }
 
         let mut stream = response.bytes_stream().eventsource();
+        let mut pending_tools: HashMap<u32, PendingToolUse> = HashMap::new();
 
         while let Some(event) = tokio::select! {
             e = stream.next() => e,
@@ -242,11 +319,58 @@ impl LlmProvider for AnthropicProvider {
             };
 
             match parsed {
+                StreamEvent::ContentBlockStart {
+                    index,
+                    content_block: ContentBlockStartPayload::ToolUse { id, name },
+                } => {
+                    pending_tools.insert(
+                        index,
+                        PendingToolUse {
+                            id,
+                            name,
+                            partial_json: String::new(),
+                        },
+                    );
+                }
                 StreamEvent::ContentBlockDelta {
+                    index,
                     delta: ContentDelta::TextDelta { text },
                 } if !text.is_empty() => {
+                    // Text always flows into the assistant-message buffer; no
+                    // need to distinguish by index since chunks within a
+                    // text block are already in order.
+                    let _ = index;
                     if sink.send(LlmEvent::TextDelta { text }).await.is_err() {
                         return Ok(());
+                    }
+                }
+                StreamEvent::ContentBlockDelta {
+                    index,
+                    delta: ContentDelta::InputJsonDelta { partial_json },
+                } => {
+                    if let Some(pt) = pending_tools.get_mut(&index) {
+                        pt.partial_json.push_str(&partial_json);
+                    }
+                }
+                StreamEvent::ContentBlockStop { index } => {
+                    if let Some(pt) = pending_tools.remove(&index) {
+                        // An empty arguments payload is valid JSON-wise as
+                        // "{}". Accept it.
+                        let source = if pt.partial_json.is_empty() {
+                            "{}".to_string()
+                        } else {
+                            pt.partial_json
+                        };
+                        let arguments: JsonValue = serde_json::from_str(&source)
+                            .unwrap_or_else(|_| JsonValue::String(source.clone()));
+                        let call = ToolCall {
+                            id: pt.id,
+                            name: pt.name,
+                            arguments,
+                        };
+                        if sink.send(LlmEvent::ToolCall(call)).await.is_err() {
+                            return Ok(());
+                        }
                     }
                 }
                 StreamEvent::MessageDelta { delta } => {

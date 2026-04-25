@@ -5,10 +5,11 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { resolveAgentModel, useAgentChat } from "@/hooks/useAgentChat";
 import { Main } from "@/views/Main";
 import { SettingsDialog } from "@/views/Settings";
-import { agentApi, modelsApi, secretsApi, settingsApi } from "@/lib/tauri";
+import { agentApi, modelsApi, secretsApi, settingsApi, skillsApi } from "@/lib/tauri";
 import type { Agent } from "@/types/agent";
 import type { InstalledModel } from "@/types/models";
 import type { Settings } from "@/types/settings";
+import type { Skill } from "@/types/skill";
 
 type SelectedFile = { path: string; name: string } | null;
 
@@ -26,6 +27,7 @@ function AppShell() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [installedModels, setInstalledModels] = useState<InstalledModel[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [selectedFile, setSelectedFile] = useState<SelectedFile>(null);
 
   const [settingsState, setSettingsState] = useState<
@@ -52,6 +54,10 @@ function AppShell() {
     const s = await settingsApi.get();
     setSettings(s);
     return s;
+  }, []);
+
+  useEffect(() => {
+    skillsApi.list().then(setSkills).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -187,10 +193,12 @@ function AppShell() {
         selectedFile={selectedFile}
         messages={chat.messages}
         streamingText={chat.streamingText}
+        pendingTools={chat.pendingTools}
         sending={chat.sending}
         chatError={chat.error}
         chatDisabled={chatDisabled}
         chatDisabledReason={chatDisabledReason}
+        skills={skills}
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
         onEditAgent={handleEditAgent}
