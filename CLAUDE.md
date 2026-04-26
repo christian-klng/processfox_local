@@ -13,9 +13,9 @@ Dieses Dokument richtet sich an Claude Code (und an alle anderen LLM-gestützten
 
 - **Produkt:** ProcessFox — Desktop-App für lokale KI-Agenten, Zielgruppe Einsteiger (kleine Unternehmen, NGOs).
 - **Framework:** Tauri v2.
-- **Frontend:** React 18 + Vite + TypeScript + Tailwind + shadcn/ui.
+- **Frontend:** React 19 + Vite + TypeScript + Tailwind + shadcn/ui.
 - **Backend:** Rust (pure Rust, keine Python-Abhängigkeit).
-- **LLM-Runtime:** Rust-nativ (candle oder mistral.rs — finale Wahl in Phase 2 nach Benchmark).
+- **LLM-Runtime:** `llama-cpp-2` (in Phase 3 von mistral.rs migriert, weil dessen GGUF-Loader Gemma 4 nicht kannte). Nutzt `apply_chat_template_oaicompat` + `streaming_state_oaicompat` für native Tool-Calling- und Reasoning-Extraktion. Cloud-Provider parallel via separate Implementierungen.
 - **Distribution:** GitHub Releases, Auto-Updater via Tauri Updater, GitHub Actions.
 
 ## 2. Goldene Regeln
@@ -48,13 +48,14 @@ Dieses Dokument richtet sich an Claude Code (und an alle anderen LLM-gestützten
 - **Datei-Organisation:** `src/components/`, `src/views/`, `src/hooks/`, `src/lib/` (für Rust-Bridge-Wrapper), `src/types/` (für geteilte TS-Typen).
 - **Kommentare:** Englisch im Code (Kommentare, Variablen-Namen). UI-Strings und Doku-Markdown auf Deutsch (siehe §8).
 
-## 4. Verzeichnis-Layout (Soll-Struktur)
+## 4. Verzeichnis-Layout (Ist-Stand)
 
 ```
 processfox/
 ├── README.md
 ├── CONCEPT.md
 ├── CLAUDE.md                       # dieses Dokument
+├── LLM_COMPATIBILITY.md
 ├── LICENSE
 ├── .gitignore
 ├── package.json
@@ -66,51 +67,79 @@ processfox/
 │   ├── main.tsx
 │   ├── App.tsx
 │   ├── components/
-│   │   ├── agent/
-│   │   ├── chat/
-│   │   ├── filetree/
-│   │   ├── preview/
+│   │   ├── agent/                  # AgentSwitcher, AgentEditorDialog, SkillIconRow
+│   │   ├── chat/                   # ChatPane, ChatInput, HitlCard, AskUserCard,
+│   │   │                           # ToolCallChip, ReasoningChip
+│   │   ├── filetree/               # FileTree (react-arborist)
+│   │   ├── preview/                # PreviewPane für Datei-Vorschau
 │   │   └── ui/                     # shadcn-Bausteine
 │   ├── views/
 │   │   ├── Main.tsx
 │   │   └── Settings.tsx
-│   ├── hooks/
+│   ├── hooks/                      # useAgentChat etc.
 │   ├── lib/
-│   │   └── tauri.ts                # typed invoke() wrappers
-│   └── types/
+│   │   └── tauri.ts                # typed invoke() wrappers + event subs
+│   └── types/                      # ChatMessage, Agent, Skill, …
 ├── src-tauri/                      # Backend (Rust)
 │   ├── Cargo.toml
 │   ├── tauri.conf.json
 │   ├── build.rs
+│   ├── skills_builtin/             # eingebaute Skills (include_dir!-eingebunden)
+│   │   ├── folder-search/
+│   │   │   └── SKILL.md
+│   │   ├── document-extend/
+│   │   ├── document-create-docx/
+│   │   ├── document-edit/
+│   │   ├── document-from-template/
+│   │   ├── table-read/
+│   │   ├── table-update/
+│   │   ├── table-create/
+│   │   └── chat-context/
 │   └── src/
 │       ├── main.rs
-│       ├── commands/
+│       ├── lib.rs                  # tauri::Builder, generate_handler!
+│       ├── state.rs                # AppState (Clone, interne Arc<OnceLock<…>>)
+│       ├── commands/               # Ein Tauri-Command-Modul pro Feature
 │       │   ├── agent.rs
-│       │   ├── file.rs
-│       │   ├── llm.rs
-│       │   ├── model.rs
+│       │   ├── chat.rs
+│       │   ├── file.rs             # list/watch/unwatch agent folder
+│       │   ├── models.rs
+│       │   ├── secrets.rs
+│       │   ├── settings.rs
 │       │   └── skill.rs
-│       ├── core/
-│       │   ├── agent.rs            # Agent-Datenmodell, Persistenz
-│       │   ├── skill.rs            # Skill-Loading, Frontmatter
-│       │   ├── tool.rs             # Tool-Registry und -Ausführung
-│       │   ├── react_loop.rs       # ReAct-Orchestrierung
-│       │   ├── sandbox.rs          # Sandbox-Regeln (Path-Checks, etc.)
-│       │   └── storage.rs          # App-Support-Ordner-Management
-│       ├── runtime/
-│       │   └── llm/                # LLM-Runtime-Abstraktion
-│       ├── tools/                  # einzelne Tool-Implementierungen
-│       │   ├── mod.rs
-│       │   ├── list_folder.rs
-│       │   ├── read_file.rs
-│       │   ├── grep_in_files.rs
-│       │   ├── xlsx.rs
-│       │   ├── docx.rs
-│       │   └── ...
-│       └── skills_builtin/         # eingebaute Skills als Ressourcen
-│           ├── folder-search/
-│           │   └── SKILL.md
-│           └── ...
+│       └── core/
+│           ├── agent.rs            # Agent-Datenmodell, Persistenz
+│           ├── chat/               # ChatRunner, ReAct-Loop, ChatRepo
+│           │   ├── run.rs          # ReAct-Orchestrierung + HITL/AskUser-Pipelines
+│           │   └── repo.rs         # JSONL-Persistenz pro Agent
+│           ├── error.rs            # CoreError + CommandError
+│           ├── hardware.rs         # RAM/VRAM-Erkennung
+│           ├── llm/                # LlmProvider Trait + Implementierungen
+│           │   ├── anthropic.rs
+│           │   ├── openai.rs
+│           │   ├── openai_compat.rs
+│           │   ├── openrouter.rs
+│           │   ├── local_gguf.rs   # llama-cpp-2-Wrapper, Idle-Watcher
+│           │   ├── json_cleanup.rs
+│           │   └── registry.rs
+│           ├── models/             # GGUF-Catalog, Download-Runner
+│           ├── sandbox.rs          # ensure_in_agent_folder
+│           ├── secrets.rs          # keyring-API-Key-Storage
+│           ├── settings.rs
+│           ├── skill/              # SKILL.md-Parsing, SkillRegistry
+│           ├── storage.rs          # AppPaths
+│           ├── tool/
+│           │   ├── mod.rs          # Tool Trait, HitlPreview, ToolContext
+│           │   ├── registry.rs
+│           │   └── tools/          # einzelne Tool-Implementierungen
+│           │       ├── list_folder.rs / grep_in_files.rs / read_file.rs
+│           │       ├── read_pdf.rs / read_docx.rs / read_xlsx_range.rs
+│           │       ├── append_to_md.rs / append_to_docx.rs / rewrite_file.rs
+│           │       ├── write_docx.rs / write_docx_from_template.rs
+│           │       ├── write_xlsx.rs / update_xlsx_cell.rs
+│           │       └── ask_user.rs
+│           ├── types.rs
+│           └── watcher.rs          # notify-debouncer-mini Folder-Watch
 ├── docs/
 │   ├── architecture.md
 │   ├── roadmap.md
@@ -126,10 +155,11 @@ processfox/
 
 ### Tauri Commands (Rust → Frontend)
 
-- Jeder Command nimmt eine `AppState` (Arc<Mutex<…>>) entgegen, liest nie globalen Zustand direkt.
+- Jeder Command nimmt `tauri::State<'_, AppState>` entgegen. `AppState` selbst ist `Clone` mit pro-Feld `Arc<OnceLock<…>>` für lazy-initialisierte Singletons (ChatRunner, DownloadRunner, FolderWatcher) — kein globaler Mutex außenrum.
 - Fehler werden als `Result<T, CommandError>` zurückgegeben, wobei `CommandError` serialisierbar ist und einen `code`, `message`, und optional `details` enthält.
 - Lange Operationen (Modell-Download, ReAct-Loop) laufen via Tauri-Events (`app.emit`), nicht als Return-Value.
 - Command-Namen in `snake_case` in Rust, TypeScript-Seite wrappt zu `camelCase`.
+- **Serde-Falle**: Bei getaggten Enums (wie `RunEvent`, `HitlPreview`) reicht `#[serde(rename_all = "camelCase")]` allein nicht — das renamed nur die Varianten-Tags, nicht die Felder *innerhalb* der Varianten. Immer `rename_all_fields = "camelCase"` zusätzlich setzen, sonst kommt das JSON mit snake_case-Feldnamen am Frontend an.
 
 ### Frontend-Bridge (`src/lib/tauri.ts`)
 
@@ -138,9 +168,10 @@ processfox/
 
 ### LLM-Runtime-Abstraktion
 
-- Trait `LlmProvider` mit async `generate(messages, tools, params) -> Stream<Event>`.
-- Implementierungen: `LocalGgufProvider`, `AnthropicProvider`, `OpenAiProvider`, `OpenRouterProvider`.
-- Einheitliches Event-Format: `TextDelta`, `ToolCall`, `Finish { reason }`.
+- Trait `LlmProvider` mit async `generate(request, sink, cancel) -> CoreResult<()>`. Streamt `LlmEvent`s über einen `mpsc::Sender`, respektiert `CancellationToken`.
+- Implementierungen: `LocalGgufProvider` (llama-cpp-2), `AnthropicProvider`, `OpenAiProvider`, `OpenRouterProvider`.
+- Einheitliches Event-Format: `TextDelta`, `ReasoningDelta` (für `<|channel>thought` u. ä.), `ToolCall`, `Finish { reason }`, `Error { code, message }`.
+- `supports_tools()` markiert Provider, die `request.tools` verarbeiten können — der ReAct-Loop reicht Tools nur an Provider, die das bestätigen.
 - **Lokales Modell-Lifecycle:** `LocalGgufProvider` hält ein Modell zwischen Generations geladen, entlädt es aber nach 10 min Idle automatisch (Watcher in `ensure_idle_watcher`). Wer den RAM-Bedarf debuggt oder zusätzliche Trigger zum Entladen einbaut (z. B. beim Wechsel auf Cloud-Provider), arbeitet hier — nicht den Watcher umgehen, sondern ergänzen.
 
 ### Tool-Registry
@@ -185,8 +216,9 @@ Zusätzlich: Symlink-Escape-Prävention durch `canonicalize`; Denylist für spez
 
 - **Rust:** `cargo test` für Unit-Tests pro Tool. Integration-Tests für ReAct-Loop mit Mock-LLM.
 - **Frontend:** `vitest` für Hooks und Utility-Funktionen. Storybook optional für Komponenten in späteren Phasen.
-- **E2E:** Playwright/WebDriver-basierte Tests erst ab Phase 5; in früheren Phasen manuelle Tests reichen.
-- **Tool-Calling mit echten Modellen:** Eigenes Test-Script, das pro Skill 3–5 Referenz-Prompts durchjagt und Pass/Fail loggt. Wird in Phase 3/4 aufgebaut.
+- **Build-Gates vor jedem Commit:** `cargo fmt`, `cargo clippy --all-targets --no-default-features -- -D warnings`, `npm run build`. Smoke-Run im `tauri dev`-Fenster für jede HITL-fähige Änderung.
+- **E2E:** Playwright/WebDriver-basierte Tests sind für Phase 5/6 vorgesehen, aktuell noch nicht aufgesetzt — in der Zwischenzeit reicht der manuelle Smoke-Run.
+- **Tool-Calling mit echten Modellen:** Eigenes Test-Script ist nicht aufgebaut; statt dessen läuft die Validierung pro Skill manuell beim Smoke-Run nach jeder Etappe.
 
 ## 8. Sprach-Konvention
 
