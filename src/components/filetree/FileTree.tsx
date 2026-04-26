@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
+import {
+  Tree,
+  type NodeApi,
+  type NodeRendererProps,
+  type TreeApi,
+} from "react-arborist";
 import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 
 import { iconForFile } from "@/lib/fileIcons";
@@ -13,11 +18,19 @@ type TreeNode = {
   path: string;
   isDir: boolean;
   children?: TreeNode[];
+  /** True once we've fetched this dir's contents at least once. Lets us
+   *  tell "directory we never opened" apart from "directory we opened
+   *  and it really was empty" — without this we'd re-fetch on every
+   *  toggle. */
+  loaded?: boolean;
 };
 
 type Props = {
   agentId: string | null;
-  hasFolder: boolean;
+  /** Absolute path to the agent's folder. We pass it explicitly (not just
+   *  a `hasFolder` boolean) so the tree re-fetches when the user switches
+   *  the folder of an existing agent without changing its ID. */
+  agentFolder: string | null;
   /** Bump to force a refetch (e.g. after a chat message is sent). */
   refreshSignal?: number;
   onSelectFile: (path: string, name: string) => void;
@@ -26,16 +39,18 @@ type Props = {
 
 export function FileTree({
   agentId,
-  hasFolder,
+  agentFolder,
   refreshSignal,
   onSelectFile,
   onRequestPickFolder,
 }: Props) {
+  const hasFolder = Boolean(agentFolder);
   const [data, setData] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const treeRef = useRef<TreeApi<TreeNode> | null>(null);
   const [size, setSize] = useState({ width: 260, height: 480 });
 
   useEffect(() => {
@@ -59,15 +74,7 @@ export function FileTree({
     fileApi
       .listAgentFolder(agentId)
       .then((entries: FileEntry[]) => {
-        setData(
-          entries.map((e) => ({
-            id: e.path,
-            name: e.name,
-            path: e.path,
-            isDir: e.isDir,
-            children: e.isDir ? [] : undefined,
-          })),
-        );
+        setData(entries.map(entryToNode));
       })
       .catch((err) => {
         setError(typeof err === "string" ? err : (err?.message ?? String(err)));
@@ -75,7 +82,8 @@ export function FileTree({
       .finally(() => {
         setLoading(false);
       });
-  }, [agentId, hasFolder]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agentId, agentFolder]);
 
   // Initial load, re-load on agent / folder change, and re-load whenever
   // the parent bumps `refreshSignal` (typically when a chat message is sent
@@ -84,6 +92,30 @@ export function FileTree({
     refresh();
   }, [refresh, refreshSignal]);
 
+  // Lazy-load a directory's contents the first time it's opened. We update
+  // the tree by walking it and replacing the matching node — the rest of
+  // the tree stays untouched so other expansions don't collapse.
+  const loadChildren = useCallback(
+    async (node: NodeApi<TreeNode>) => {
+      if (!agentId) return;
+      if (!node.data.isDir || node.data.loaded) return;
+      try {
+        const entries = await fileApi.listAgentFolder(agentId, node.data.path);
+        const children = entries.map(entryToNode);
+        setData((prev) =>
+          mapTreeNode(prev, node.data.id, (n) => ({
+            ...n,
+            children,
+            loaded: true,
+          })),
+        );
+      } catch (err) {
+        setError(typeof err === "string" ? err : (err as Error).message ?? String(err));
+      }
+    },
+    [agentId],
+  );
+
   // Re-load whenever the window regains focus — typical cadence for users
   // who jumped to Finder to drop files in the agent folder.
   useEffect(() => {
@@ -91,7 +123,7 @@ export function FileTree({
     const handler = () => refresh();
     window.addEventListener("focus", handler);
     return () => window.removeEventListener("focus", handler);
-  }, [agentId, hasFolder, refresh]);
+  }, [agentId, hasFolder, refresh, agentFolder]);
 
   // Live FS watcher: arm a backend notify-watcher on the agent folder and
   // refresh whenever it pings. Drops the watch when the agent or folder
@@ -119,7 +151,7 @@ export function FileTree({
       if (unlisten) unlisten();
       fileApi.unwatchAgentFolder().catch(() => {});
     };
-  }, [agentId, hasFolder, refresh]);
+  }, [agentId, hasFolder, agentFolder, refresh]);
 
   const content = useMemo(() => {
     if (!agentId) {
@@ -170,6 +202,13 @@ export function FileTree({
         onActivate={(node: NodeApi<TreeNode>) => {
           if (!node.data.isDir) onSelectFile(node.data.path, node.data.name);
         }}
+        onToggle={(id) => {
+          const node = treeRef.current?.get(id);
+          // react-arborist toggles BEFORE it calls onToggle, so a now-open
+          // directory is what we want to lazy-load.
+          if (node && node.isOpen) loadChildren(node);
+        }}
+        ref={treeRef}
       >
         {Node}
       </Tree>
@@ -235,9 +274,41 @@ function Node({
           return <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
         })()
       )}
-      <span className="truncate">{node.data.name}</span>
+      <span
+        className="min-w-0 flex-1 truncate"
+        title={node.data.name}
+      >
+        {node.data.name}
+      </span>
     </div>
   );
+}
+
+function entryToNode(e: FileEntry): TreeNode {
+  return {
+    id: e.path,
+    name: e.name,
+    path: e.path,
+    isDir: e.isDir,
+    children: e.isDir ? [] : undefined,
+    loaded: false,
+  };
+}
+
+/** Walk a TreeNode forest, applying `update` to the node whose `id` matches.
+ *  Returns a new array (no in-place mutation) so React picks up the change. */
+function mapTreeNode(
+  nodes: TreeNode[],
+  id: string,
+  update: (n: TreeNode) => TreeNode,
+): TreeNode[] {
+  return nodes.map((n) => {
+    if (n.id === id) return update(n);
+    if (n.children && n.children.length > 0) {
+      return { ...n, children: mapTreeNode(n.children, id, update) };
+    }
+    return n;
+  });
 }
 
 function EmptyState({

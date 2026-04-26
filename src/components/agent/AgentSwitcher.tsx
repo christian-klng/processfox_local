@@ -36,14 +36,15 @@ export function AgentSwitcher({
           <Button
             variant="ghost"
             size="sm"
-            className="flex-1 justify-between gap-2 px-2 font-normal hover:bg-accent/60"
+            className="min-w-0 flex-1 justify-between gap-2 px-2 font-normal hover:bg-accent/60"
+            title={activeAgent?.name}
           >
-            <span className="flex items-center gap-2 truncate">
+            <span className="flex min-w-0 items-center gap-2">
               <DynamicIcon
                 name={activeAgent?.icon}
                 className="h-4 w-4 shrink-0"
               />
-              <span className="truncate text-sm font-medium">
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
                 {activeAgent?.name ?? "Kein Agent"}
               </span>
             </span>
@@ -80,7 +81,7 @@ export function AgentSwitcher({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8"
+        className="h-8 w-8 shrink-0"
         onClick={onEdit}
         disabled={!activeAgent}
         title="Agent bearbeiten"
@@ -90,7 +91,7 @@ export function AgentSwitcher({
       <Button
         variant="ghost"
         size="icon"
-        className="h-8 w-8"
+        className="h-8 w-8 shrink-0"
         onClick={onOpenSettings}
         title="Einstellungen"
       >

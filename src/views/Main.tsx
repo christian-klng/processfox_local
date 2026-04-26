@@ -1,6 +1,7 @@
 import { AgentSwitcher } from "@/components/agent/AgentSwitcher";
 import { SkillIconRow } from "@/components/agent/SkillIconRow";
 import { ChatPane } from "@/components/chat/ChatPane";
+import type { StarterPrompt } from "@/lib/starterPrompts";
 import { FileTree } from "@/components/filetree/FileTree";
 import { PreviewPane } from "@/components/preview/PreviewPane";
 import {
@@ -27,6 +28,8 @@ type Props = {
   chatError: string | null;
   chatDisabled: boolean;
   chatDisabledReason: string | undefined;
+  starterPrompts: StarterPrompt[];
+  inputPrefill?: { text: string; token: number };
   skills: Skill[];
   fileTreeRefresh: number;
   onSelectAgent: (agent: Agent) => void;
@@ -40,6 +43,7 @@ type Props = {
   onApproveHitl: () => void;
   onRejectHitl: () => void;
   onRespondToQuestion: (answer: string) => void;
+  onPrefillInput: (text: string) => void;
   onDismissChatError: () => void;
 };
 
@@ -57,6 +61,8 @@ export function Main({
   chatError,
   chatDisabled,
   chatDisabledReason,
+  starterPrompts,
+  inputPrefill,
   skills,
   fileTreeRefresh,
   onSelectAgent,
@@ -70,6 +76,7 @@ export function Main({
   onApproveHitl,
   onRejectHitl,
   onRespondToQuestion,
+  onPrefillInput,
   onDismissChatError,
 }: Props) {
   const showPreview = selectedFile !== null;
@@ -93,7 +100,7 @@ export function Main({
           <div className="flex-1 overflow-hidden border-t border-border">
             <FileTree
               agentId={activeAgent?.id ?? null}
-              hasFolder={Boolean(activeAgent?.folder)}
+              agentFolder={activeAgent?.folder ?? null}
               refreshSignal={fileTreeRefresh}
               onSelectFile={onSelectFile}
               onRequestPickFolder={onEditAgent}
@@ -129,11 +136,14 @@ export function Main({
           error={chatError}
           disabled={chatDisabled}
           disabledReason={chatDisabledReason}
+          starterPrompts={starterPrompts}
+          inputPrefill={inputPrefill}
           onSend={onSendMessage}
           onCancel={onCancelRun}
           onApproveHitl={onApproveHitl}
           onRejectHitl={onRejectHitl}
           onRespondToQuestion={onRespondToQuestion}
+          onPrefillInput={onPrefillInput}
           onDismissError={onDismissChatError}
           onOpenSettings={onOpenSettings}
         />

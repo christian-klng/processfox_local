@@ -28,10 +28,19 @@ export const fileApi = {
   watchAgentFolder: (agentId: string) =>
     invoke<void>("watch_agent_folder", { agentId }),
   unwatchAgentFolder: () => invoke<void>("unwatch_agent_folder"),
+  openLogsFolder: () => invoke<void>("open_logs_folder"),
+  importFilesToAgent: (agentId: string, paths: string[]) =>
+    invoke<string[]>("import_files_to_agent", { agentId, paths }),
   /** Subscribe to FS-changed pings emitted by the watcher. The payload
    *  is empty `()`; callers should use it as a signal to refresh. */
   subscribeFsChanged: (handler: () => void): Promise<UnlistenFn> =>
     listen("fs-changed", () => handler()),
+  /** Subscribe to drag-and-drop events from the OS. Payload is the list of
+   *  absolute file paths the user dropped onto the window. */
+  subscribeFilesDropped: (
+    handler: (paths: string[]) => void,
+  ): Promise<UnlistenFn> =>
+    listen<string[]>("files-dropped", (evt) => handler(evt.payload)),
 };
 
 export const settingsApi = {

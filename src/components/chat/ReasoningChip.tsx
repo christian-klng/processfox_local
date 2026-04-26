@@ -38,7 +38,7 @@ export function ReasoningChip({ text, streaming }: Props) {
         )}
       </button>
       {(expanded || streaming) && canExpand && (
-        <pre className="mt-1 max-h-64 overflow-auto rounded-sm bg-background/60 p-1.5 text-[11px] whitespace-pre-wrap font-mono">
+        <pre className="mt-1 max-h-64 overflow-auto rounded-sm bg-background/60 p-1.5 text-xs whitespace-pre-wrap font-mono">
           {text}
         </pre>
       )}

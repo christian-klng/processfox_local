@@ -34,11 +34,11 @@ export function ToolCallChip({ name, status, arguments: args, result }: Props) {
       className={cn(
         "flex flex-col gap-1 rounded-md border px-2.5 py-1.5 text-xs",
         status === "running" &&
-          "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+          "border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200",
         status === "done" &&
           "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
         status === "error" &&
-          "border-destructive/40 bg-destructive/10 text-destructive",
+          "border-destructive/40 bg-destructive/15 text-destructive",
       )}
     >
       <button
@@ -67,7 +67,7 @@ export function ToolCallChip({ name, status, arguments: args, result }: Props) {
       </button>
 
       {expanded && (
-        <div className="mt-1 flex flex-col gap-1.5 text-[11px]">
+        <div className="mt-1 flex flex-col gap-1.5 text-xs">
           {argsText && (
             <div>
               <div className="opacity-60">Arguments</div>

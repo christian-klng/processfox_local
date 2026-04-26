@@ -55,7 +55,7 @@ export function AskUserCard({ question, busy, onRespond }: Props) {
       />
 
       <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="text-[11px] opacity-70">⌘/Ctrl + Enter senden</span>
+        <span className="text-xs opacity-70">⌘/Ctrl + Enter senden</span>
         <Button
           size="sm"
           onClick={submit}

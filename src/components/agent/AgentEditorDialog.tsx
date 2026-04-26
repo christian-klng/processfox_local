@@ -160,14 +160,14 @@ export function AgentEditorDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-[560px]">
+      <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>
             {mode === "create" ? "Neuer Agent" : "Agent bearbeiten"}
           </DialogTitle>
         </DialogHeader>
 
-        <div className="flex flex-col gap-4 py-1">
+        <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 py-1">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="agent-name" className="text-xs">
               Name
@@ -183,7 +183,10 @@ export function AgentEditorDialog({
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">Ordner</Label>
             <div className="flex items-center gap-2">
-              <div className="flex-1 truncate rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
+              <div
+                className="min-w-0 flex-1 truncate rounded-md border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground"
+                title={folder ?? undefined}
+              >
                 {folder ?? "Kein Ordner gewählt"}
               </div>
               <Button
@@ -191,7 +194,7 @@ export function AgentEditorDialog({
                 variant="outline"
                 size="sm"
                 onClick={pickFolder}
-                className="gap-2"
+                className="shrink-0 gap-2"
               >
                 <Folder className="h-3.5 w-3.5" />
                 Wählen
@@ -377,7 +380,7 @@ export function AgentEditorDialog({
               <span className="text-xs font-medium">
                 Schreiben ohne Rückfrage
               </span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 Schreib-Tools laufen sofort durch — der Freigabe-Dialog wird
                 übersprungen. Vorsicht: nur für Agenten verwenden, denen du
                 das eigenständige Arbeiten in „ihrem" Ordner zutraust.
@@ -386,7 +389,7 @@ export function AgentEditorDialog({
           </label>
 
           {error && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            <div className="rounded-md border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive">
               {error}
             </div>
           )}

@@ -421,7 +421,7 @@ function CatalogCard({
       )}
 
       {download.status === "error" && (
-        <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <div className="mt-3 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div className="flex-1">{download.message}</div>
           <button
@@ -456,7 +456,7 @@ function ProgressBar({
           <div className="h-full w-1/3 animate-pulse bg-primary/60" />
         )}
       </div>
-      <div className="flex justify-between text-[11px] text-muted-foreground">
+      <div className="flex justify-between text-xs text-muted-foreground">
         <span>
           {formatBytes(received)}
           {total ? ` / ${formatBytes(total)}` : ""}
@@ -536,7 +536,7 @@ function CustomUrlDownload({
           )}
         </div>
         {filename && (
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Speichert als{" "}
             <span className="text-foreground">{filename}</span>
             {alreadyInstalled && " — bereits installiert."}
@@ -549,7 +549,7 @@ function CustomUrlDownload({
           />
         )}
         {currentState?.status === "error" && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div className="flex-1">{currentState.message}</div>
           </div>

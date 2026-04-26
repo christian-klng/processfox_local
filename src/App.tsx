@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { AgentEditorDialog } from "@/components/agent/AgentEditorDialog";
 import { ThemeProvider } from "@/components/theme-provider";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { resolveAgentModel, useAgentChat } from "@/hooks/useAgentChat";
 import { Main } from "@/views/Main";
 import { SettingsDialog } from "@/views/Settings";
-import { agentApi, modelsApi, secretsApi, settingsApi, skillsApi } from "@/lib/tauri";
+import { WelcomeDialog } from "@/views/Welcome";
+import { agentApi, fileApi, modelsApi, secretsApi, settingsApi, skillsApi } from "@/lib/tauri";
+import { pickStarterPrompts } from "@/lib/starterPrompts";
 import type { Agent } from "@/types/agent";
 import type { InstalledModel } from "@/types/models";
 import type { Settings } from "@/types/settings";
@@ -16,7 +19,12 @@ type SelectedFile = { path: string; name: string } | null;
 export default function App() {
   return (
     <ThemeProvider>
-      <AppShell />
+      {/* 150 ms feels close to instant without firing tooltips on every
+          casual mouse drift across the UI. Native `title` is ~500 ms and
+          can't be tuned. */}
+      <TooltipProvider delayDuration={150} skipDelayDuration={50}>
+        <AppShell />
+      </TooltipProvider>
     </ThemeProvider>
   );
 }
@@ -37,6 +45,18 @@ function AppShell() {
   const [agentEditor, setAgentEditor] = useState<
     { mode: "create" | "edit" } | null
   >(null);
+  const [inputPrefill, setInputPrefill] = useState<
+    { text: string; token: number } | undefined
+  >(undefined);
+
+  const handlePrefillInput = useCallback((text: string) => {
+    setInputPrefill((prev) => ({ text, token: (prev?.token ?? 0) + 1 }));
+  }, []);
+
+  const starterPrompts = useMemo(
+    () => pickStarterPrompts(activeAgent?.skills ?? []),
+    [activeAgent],
+  );
 
   const effectiveModel = useMemo(
     () => resolveAgentModel(activeAgent, settings),
@@ -73,16 +93,22 @@ function AppShell() {
 
   useEffect(() => {
     Promise.all([refreshAgents(), refreshSettings()])
-      .then(([list, s]) => {
+      .then(([list]) => {
         if (list.length > 0) setActiveAgent(list[0]);
-        // First-run onboarding: open Settings on the Models tab so the user
-        // can either download a local model or configure a cloud provider.
-        if (!s.firstRunDone) {
-          setSettingsState({ open: true, tab: "models" });
-        }
       })
       .catch((e) => console.error("initial load failed", e));
   }, [refreshAgents, refreshSettings]);
+
+  const showWelcome = settings !== null && !settings.firstRunDone;
+
+  const handleFinishWelcome = useCallback(async () => {
+    try {
+      const updated = await settingsApi.setFirstRunDone();
+      setSettings(updated);
+    } catch (e) {
+      console.error("set first-run-done failed", e);
+    }
+  }, []);
 
   // Refresh the installed-models list whenever Settings closes (the user may
   // have downloaded or deleted a model). This feeds the local-model gate below.
@@ -149,6 +175,52 @@ function AppShell() {
     () => setSettingsState({ open: true, tab: "cloud" }),
     [],
   );
+
+  // Global keyboard shortcuts: Cmd/Ctrl+N for new agent, Cmd/Ctrl+, for
+  // settings. Cmd/Ctrl+Enter to send is handled inside ChatInput. We skip
+  // the shortcut when the user is typing in an input/textarea so it doesn't
+  // hijack legitimate keystrokes (e.g. , in a chat message).
+  useEffect(() => {
+    function handle(e: KeyboardEvent) {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const inField =
+        tag === "input" || tag === "textarea" || target?.isContentEditable;
+      if (e.key === "n" && !inField) {
+        e.preventDefault();
+        setAgentEditor({ mode: "create" });
+      } else if (e.key === ",") {
+        // Cmd+, opens settings even from inside fields — that's how every
+        // macOS app behaves; users would be surprised otherwise.
+        e.preventDefault();
+        setSettingsState({ open: true, tab: "cloud" });
+      }
+    }
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+
+  // OS drag-and-drop: when the user drops files anywhere on the window,
+  // copy them into the active agent's folder. The folder watcher then
+  // refreshes the FileTree on its own.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    fileApi
+      .subscribeFilesDropped((paths) => {
+        if (!activeAgent || !activeAgent.folder) return;
+        fileApi.importFilesToAgent(activeAgent.id, paths).catch((e) => {
+          console.warn("import failed", e);
+        });
+      })
+      .then((u) => {
+        unlisten = u;
+      })
+      .catch((e) => console.warn("drop subscribe failed", e));
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [activeAgent]);
   const handleCloseSettings = useCallback(() => {
     setSettingsState({ open: false });
     // Re-fetch settings on close in case the user changed a default.
@@ -212,6 +284,8 @@ function AppShell() {
         chatError={chat.error}
         chatDisabled={chatDisabled}
         chatDisabledReason={chatDisabledReason}
+        starterPrompts={starterPrompts}
+        inputPrefill={inputPrefill}
         skills={skills}
         fileTreeRefresh={fileTreeRefresh}
         onSelectAgent={handleSelectAgent}
@@ -225,6 +299,7 @@ function AppShell() {
         onApproveHitl={chat.approveHitl}
         onRejectHitl={() => chat.rejectHitl()}
         onRespondToQuestion={chat.respondToQuestion}
+        onPrefillInput={handlePrefillInput}
         onDismissChatError={chat.clearError}
       />
 
@@ -241,6 +316,19 @@ function AppShell() {
         defaultTab={settingsState.open ? settingsState.tab : undefined}
         onClose={handleCloseSettings}
         onSettingsChange={handleSettingsChange}
+      />
+
+      <WelcomeDialog
+        open={showWelcome && !settingsState.open && agentEditor === null}
+        settings={settings}
+        installedModels={installedModels}
+        hasApiKey={hasApiKey}
+        agents={agents}
+        onOpenSettings={() =>
+          setSettingsState({ open: true, tab: "models" })
+        }
+        onCreateAgent={() => setAgentEditor({ mode: "create" })}
+        onFinish={handleFinishWelcome}
       />
     </div>
   );

@@ -108,3 +108,73 @@ pub async fn unwatch_agent_folder(
     state.folder_watcher(&app).unwatch();
     Ok(())
 }
+
+/// Copy files (e.g. drag-dropped from Finder) into an agent's folder.
+/// Existing files are renamed by appending a counter so the user never
+/// loses content. Returns the resolved final filenames so the frontend
+/// can confirm what was imported.
+#[tauri::command]
+pub async fn import_files_to_agent(
+    agent_id: String,
+    paths: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<Vec<String>, CommandError> {
+    let agent = state.agent_repo().get(&agent_id)?;
+    let folder = agent.folder.ok_or_else(|| {
+        CommandError::new(
+            "agent_has_no_folder",
+            "Für diesen Agenten ist kein Ordner konfiguriert.",
+        )
+    })?;
+    let mut imported = Vec::new();
+    for raw in paths {
+        let src = std::path::PathBuf::from(&raw);
+        if !src.is_file() {
+            // Skip directories and non-existent paths silently — drag-drop
+            // from Finder can deliver folders, but recursive copy is out of
+            // scope for v1.
+            continue;
+        }
+        let Some(name) = src.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let target = unique_target_in(&folder, name);
+        std::fs::copy(&src, &target).map_err(CoreError::from)?;
+        imported.push(target.file_name().unwrap().to_string_lossy().to_string());
+    }
+    Ok(imported)
+}
+
+fn unique_target_in(folder: &std::path::Path, name: &str) -> PathBuf {
+    let candidate = folder.join(name);
+    if !candidate.exists() {
+        return candidate;
+    }
+    let (stem, ext) = match name.rsplit_once('.') {
+        Some((s, e)) => (s, format!(".{e}")),
+        None => (name, String::new()),
+    };
+    for n in 1..1000 {
+        let alt = folder.join(format!("{stem} ({n}){ext}"));
+        if !alt.exists() {
+            return alt;
+        }
+    }
+    candidate
+}
+
+/// Reveal the daily log directory in Finder/Explorer/Files. Wired to the
+/// "Logs öffnen" link on chat error banners.
+#[tauri::command]
+pub async fn open_logs_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    use tauri_plugin_opener::OpenerExt;
+    let dir = state.paths.logs_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    app.opener()
+        .open_path(dir.to_string_lossy().to_string(), None::<&str>)
+        .map_err(|e| CommandError::new("open_failed", e.to_string()))?;
+    Ok(())
+}

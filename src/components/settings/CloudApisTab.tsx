@@ -300,7 +300,7 @@ function ProviderCard({
             href={meta.helpUrl}
             target="_blank"
             rel="noreferrer"
-            className="text-[11px] text-muted-foreground hover:text-foreground"
+            className="text-xs text-muted-foreground hover:text-foreground"
           >
             Wo finde ich meinen API-Key?
           </a>
@@ -333,14 +333,14 @@ function ProviderCard({
         </div>
 
         {status.state === "invalid" && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <div className="flex-1">{status.message}</div>
           </div>
         )}
 
         {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          <div className="rounded-md border border-destructive/40 bg-destructive/15 px-3 py-2 text-xs text-destructive">
             {error}
           </div>
         )}

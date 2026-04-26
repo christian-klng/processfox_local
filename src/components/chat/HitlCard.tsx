@@ -1,13 +1,16 @@
 import {
   Check,
+  ChevronRight,
   FileEdit,
   FilePen,
   FilePlus,
   FileStack,
   FileText,
+  Loader2,
   Sheet as SheetIcon,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { diffLines } from "diff";
 
 import { Button } from "@/components/ui/button";
@@ -24,11 +27,14 @@ export function HitlCard({ hitl, busy, onApprove, onReject }: Props) {
   const { preview } = hitl;
   const heading = headingFor(preview);
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200">
+    <div className="flex flex-col gap-2.5 rounded-md border border-amber-500/40 bg-amber-500/15 p-3 text-xs text-amber-800 dark:text-amber-200">
       <div className="flex items-center gap-2">
-        <heading.Icon className="h-3.5 w-3.5" />
+        <heading.Icon className="h-3.5 w-3.5 shrink-0" />
         <span className="text-sm font-medium">{heading.label}</span>
-        <span className="ml-auto rounded-sm border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 font-mono text-[11px]">
+        <span
+          className="ml-auto truncate font-mono text-xs opacity-60"
+          title={`Tool: ${hitl.toolName}`}
+        >
           {hitl.toolName}
         </span>
       </div>
@@ -49,7 +55,11 @@ export function HitlCard({ hitl, busy, onApprove, onReject }: Props) {
           Ablehnen
         </Button>
         <Button size="sm" onClick={onApprove} disabled={busy} className="gap-1.5">
-          <Check className="h-3.5 w-3.5" />
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
           Freigeben
         </Button>
       </div>
@@ -57,39 +67,34 @@ export function HitlCard({ hitl, busy, onApprove, onReject }: Props) {
   );
 }
 
+function SectionLabel({ children }: { children: ReactNode }) {
+  return <div className="text-xs font-medium opacity-90">{children}</div>;
+}
+
+function PathRow({ label, path }: { label: string; path: string }) {
+  return (
+    <div className="flex items-baseline gap-2">
+      <span className="shrink-0 text-xs font-medium opacity-80">{label}</span>
+      <span
+        className="min-w-0 truncate font-mono text-xs opacity-90"
+        title={path}
+      >
+        {path}
+      </span>
+    </div>
+  );
+}
+
 function PathSummary({ preview }: { preview: HitlPreview }) {
   if (preview.kind === "writeDocxFromTemplate") {
     return (
-      <div className="flex flex-col gap-1.5">
-        <div className="flex flex-col gap-1">
-          <div className="text-[11px] uppercase tracking-wide opacity-70">
-            Vorlage
-          </div>
-          <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
-            {preview.templatePath}
-          </div>
-        </div>
-        <div className="flex flex-col gap-1">
-          <div className="text-[11px] uppercase tracking-wide opacity-70">
-            Ausgabe
-          </div>
-          <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
-            {preview.outputPath}
-          </div>
-        </div>
+      <div className="flex flex-col gap-1">
+        <PathRow label="Vorlage" path={preview.templatePath} />
+        <PathRow label="Ausgabe" path={preview.outputPath} />
       </div>
     );
   }
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="text-[11px] uppercase tracking-wide opacity-70">
-        Datei
-      </div>
-      <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
-        {preview.path}
-      </div>
-    </div>
-  );
+  return <PathRow label="Datei" path={preview.path} />;
 }
 
 function headingFor(preview: HitlPreview): {
@@ -137,7 +142,11 @@ function PreviewBody({ preview }: { preview: HitlPreview }) {
       return (
         <>
           {preview.existingTail && (
-            <Section label="Bisheriger Inhalt (Ende)" subdued>
+            <Section
+              label="Bisheriger Inhalt (Ende)"
+              subdued
+              defaultOpen={false}
+            >
               {preview.existingTail}
             </Section>
           )}
@@ -159,7 +168,7 @@ function PreviewBody({ preview }: { preview: HitlPreview }) {
             {preview.previewText}
           </Section>
           {!preview.createsFile && (
-            <p className="text-[11px] opacity-80">
+            <p className="text-xs opacity-80">
               ⚠ Diese Datei existiert bereits und wird komplett überschrieben.
               Vorhandene Formatierung geht verloren — für Erweiterung benutze
               den Skill „Dokument fortschreiben".
@@ -171,7 +180,11 @@ function PreviewBody({ preview }: { preview: HitlPreview }) {
       return (
         <>
           {preview.existingTail && (
-            <Section label="Bisheriger Inhalt (Ende, als Text)" subdued>
+            <Section
+              label="Bisheriger Inhalt (Ende, als Text)"
+              subdued
+              defaultOpen={false}
+            >
               {preview.existingTail}
             </Section>
           )}
@@ -216,24 +229,27 @@ function Section({
   label,
   children,
   subdued,
+  defaultOpen = true,
 }: {
   label: string;
   children: string;
   subdued?: boolean;
+  defaultOpen?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-[11px] uppercase tracking-wide opacity-70">
+    <details open={defaultOpen} className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium opacity-90 hover:opacity-100 [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
         {label}
-      </div>
+      </summary>
       <pre
-        className={`max-h-64 overflow-auto rounded-sm border border-amber-500/30 ${
+        className={`mt-1 max-h-48 overflow-auto rounded-sm border border-amber-500/30 ${
           subdued ? "bg-background/40 opacity-80" : "bg-background/60"
-        } p-2 font-mono text-[11px] whitespace-pre-wrap`}
+        } p-2 font-mono text-xs whitespace-pre-wrap`}
       >
         {children}
       </pre>
-    </div>
+    </details>
   );
 }
 
@@ -253,12 +269,12 @@ function WriteXlsxSection({
   return (
     <>
       <div className="flex flex-col gap-1">
-        <div className="text-[11px] uppercase tracking-wide opacity-70">
+        <SectionLabel>
           Sheet „{sheet}" — {rows.length}{" "}
           {rows.length === 1 ? "Zeile" : "Zeilen"} × {colCount}{" "}
           {colCount === 1 ? "Spalte" : "Spalten"}
-        </div>
-        <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+        </SectionLabel>
+        <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-xs">
           <table className="w-full">
             <tbody>
               {visible.map((row, i) => (
@@ -279,13 +295,13 @@ function WriteXlsxSection({
           </table>
         </div>
         {hidden > 0 && (
-          <div className="text-[11px] opacity-70">
+          <div className="text-xs opacity-70">
             … +{hidden} weitere {hidden === 1 ? "Zeile" : "Zeilen"} (nicht angezeigt)
           </div>
         )}
       </div>
       {!createsFile && (
-        <p className="text-[11px] opacity-80">
+        <p className="text-xs opacity-80">
           ⚠ Diese Datei existiert bereits und wird komplett ersetzt — vorhandene
           Sheets, Formatierung und Formeln gehen verloren. Für gezielte Änderungen
           benutze den Skill „Tabelle ändern".
@@ -309,11 +325,11 @@ function TemplateSection({
   return (
     <>
       <div className="flex flex-col gap-1">
-        <div className="text-[11px] uppercase tracking-wide opacity-70">
+        <SectionLabel>
           Platzhalter füllen — {replacements.length}{" "}
           {replacements.length === 1 ? "Eintrag" : "Einträge"}
-        </div>
-        <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+        </SectionLabel>
+        <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 text-xs">
           <table className="w-full">
             <thead>
               <tr className="border-b border-amber-500/30 text-left opacity-70">
@@ -327,7 +343,7 @@ function TemplateSection({
                   key={r.key}
                   className="border-b border-amber-500/20 last:border-b-0"
                 >
-                  <td className="px-2 py-1 align-top">{`{{${r.key}}}`}</td>
+                  <td className="px-2 py-1 align-top font-mono">{`{{${r.key}}}`}</td>
                   <td className="px-2 py-1 align-top whitespace-pre-wrap">
                     {r.value || <span className="opacity-50">(leer)</span>}
                   </td>
@@ -338,7 +354,7 @@ function TemplateSection({
         </div>
       </div>
       {missing.length > 0 && (
-        <p className="text-[11px] opacity-80">
+        <p className="text-xs opacity-80">
           ⚠ Die Vorlage enthält noch ungefüllte Platzhalter:{" "}
           {missing.map((k) => `{{${k}}}`).join(", ")}. Wenn diese im
           Ergebnis-Dokument als Klartext erscheinen sollen, ist das ok — sonst
@@ -346,7 +362,7 @@ function TemplateSection({
         </p>
       )}
       {!createsFile && (
-        <p className="text-[11px] opacity-80">
+        <p className="text-xs opacity-80">
           ⚠ Die Ausgabedatei existiert bereits und wird ersetzt.
         </p>
       )}
@@ -363,10 +379,8 @@ function CellChangesSection({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="text-[11px] uppercase tracking-wide opacity-70">
-        Sheet „{sheet}" — Änderungen
-      </div>
-      <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+      <SectionLabel>Sheet „{sheet}" — Änderungen</SectionLabel>
+      <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 text-xs">
         <table className="w-full">
           <thead>
             <tr className="border-b border-amber-500/30 text-left opacity-70">
@@ -381,11 +395,11 @@ function CellChangesSection({
                 key={`${c.cell}-${i}`}
                 className="border-b border-amber-500/20 last:border-b-0"
               >
-                <td className="px-2 py-1 font-medium">{c.cell}</td>
-                <td className="px-2 py-1 align-top text-rose-700 line-through opacity-80 dark:text-rose-300">
+                <td className="px-2 py-1 font-mono font-medium">{c.cell}</td>
+                <td className="px-2 py-1 align-top font-mono text-rose-700 line-through opacity-80 dark:text-rose-300">
                   {c.before || <span className="opacity-50">(leer)</span>}
                 </td>
-                <td className="px-2 py-1 align-top text-emerald-700 dark:text-emerald-300">
+                <td className="px-2 py-1 align-top font-mono text-emerald-700 dark:text-emerald-300">
                   {c.after || <span className="opacity-50">(leer)</span>}
                 </td>
               </tr>
@@ -400,11 +414,12 @@ function CellChangesSection({
 function DiffSection({ before, after }: { before: string; after: string }) {
   const parts = diffLines(before, after);
   return (
-    <div className="flex flex-col gap-1">
-      <div className="text-[11px] uppercase tracking-wide opacity-70">
+    <details open className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium opacity-90 hover:opacity-100 [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
         Änderungen
-      </div>
-      <div className="max-h-80 overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+      </summary>
+      <div className="mt-1 max-h-64 overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-xs">
         {parts.length === 0 ? (
           <div className="px-2 py-1 italic opacity-70">Keine Änderungen.</div>
         ) : (
@@ -429,6 +444,6 @@ function DiffSection({ before, after }: { before: string; after: string }) {
           })
         )}
       </div>
-    </div>
+    </details>
   );
 }

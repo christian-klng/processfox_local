@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowUp } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -7,10 +7,24 @@ type Props = {
   disabled?: boolean;
   disabledReason?: string;
   onSend: (text: string) => void;
+  /** Bump `token` to set the input value externally (e.g. starter chips).
+   *  We watch the token rather than the text so the same prompt can be
+   *  applied twice in a row. */
+  prefill?: { text: string; token: number };
 };
 
-export function ChatInput({ disabled, disabledReason, onSend }: Props) {
+export function ChatInput({ disabled, disabledReason, onSend, prefill }: Props) {
   const [value, setValue] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const lastTokenRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!prefill) return;
+    if (lastTokenRef.current === prefill.token) return;
+    lastTokenRef.current = prefill.token;
+    setValue(prefill.text);
+    ref.current?.focus();
+  }, [prefill]);
 
   function handleSend() {
     const trimmed = value.trim();
@@ -30,6 +44,7 @@ export function ChatInput({ disabled, disabledReason, onSend }: Props) {
     <div className="border-t border-border bg-surface p-3">
       <div className="relative rounded-md border border-border bg-background focus-within:border-ring focus-within:ring-1 focus-within:ring-ring">
         <textarea
+          ref={ref}
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKey}

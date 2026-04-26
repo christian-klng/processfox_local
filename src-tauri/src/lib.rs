@@ -5,6 +5,8 @@ pub mod state;
 use std::sync::Arc;
 
 use tauri::Manager;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{fmt, EnvFilter};
 
 use crate::core::llm::{
@@ -26,13 +28,45 @@ use crate::state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let _ = fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .try_init();
+    // Discover paths first so we can install a daily-rotating file appender
+    // alongside the stderr layer. If discovery fails (e.g. CI without a
+    // home dir), fall back to stderr-only.
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr);
+
+    if let Ok(paths) = AppPaths::discover() {
+        let log_dir = paths.logs_dir();
+        let _ = std::fs::create_dir_all(&log_dir);
+        let file_appender = tracing_appender::rolling::daily(&log_dir, "processfox.log");
+        let (file_writer, guard) = tracing_appender::non_blocking(file_appender);
+        // Leak the guard so the worker thread keeps flushing for the
+        // lifetime of the process — non_blocking drops writes silently if
+        // the guard goes out of scope.
+        Box::leak(Box::new(guard));
+        let file_layer = fmt::layer().with_writer(file_writer).with_ansi(false);
+        let _ = tracing_subscriber::registry()
+            .with(env_filter)
+            .with(stderr_layer)
+            .with(file_layer)
+            .try_init();
+    } else {
+        let _ = tracing_subscriber::registry()
+            .with(env_filter)
+            .with(stderr_layer)
+            .try_init();
+    }
 
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            use tauri::Emitter;
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                let strs: Vec<String> = paths
+                    .iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                let _ = window.emit("files-dropped", strs);
+            }
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -84,6 +118,8 @@ pub fn run() {
             commands::file::list_agent_folder,
             commands::file::watch_agent_folder,
             commands::file::unwatch_agent_folder,
+            commands::file::open_logs_folder,
+            commands::file::import_files_to_agent,
             commands::settings::get_settings,
             commands::settings::set_default_provider,
             commands::settings::set_default_model,
