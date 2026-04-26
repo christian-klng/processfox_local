@@ -1,6 +1,7 @@
 import { ChevronsUpDown, Plus, Settings2, Pencil } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { DynamicIcon } from "@/components/ui/DynamicIcon";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -38,7 +39,10 @@ export function AgentSwitcher({
             className="flex-1 justify-between gap-2 px-2 font-normal hover:bg-accent/60"
           >
             <span className="flex items-center gap-2 truncate">
-              <span className="text-base">{activeAgent?.icon ?? "🦊"}</span>
+              <DynamicIcon
+                name={activeAgent?.icon}
+                className="h-4 w-4 shrink-0"
+              />
               <span className="truncate text-sm font-medium">
                 {activeAgent?.name ?? "Kein Agent"}
               </span>
@@ -61,7 +65,7 @@ export function AgentSwitcher({
               onSelect={() => onSelect(a)}
               className="gap-2"
             >
-              <span className="text-base">{a.icon}</span>
+              <DynamicIcon name={a.icon} className="h-4 w-4 shrink-0" />
               <span className="truncate">{a.name}</span>
             </DropdownMenuItem>
           ))}

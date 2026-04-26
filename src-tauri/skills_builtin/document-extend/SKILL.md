@@ -2,7 +2,7 @@
 name: document-extend
 title: Dokument fortschreiben
 description: Append new entries to a running Markdown, text, or Word document in the agent's folder — useful for journaling, logging decisions, meeting minutes, or building a document over multiple turns. Every write asks the user for confirmation first.
-icon: 📝
+icon: FileSignature
 tools:
   - list_folder
   - read_file

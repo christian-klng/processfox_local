@@ -2,11 +2,12 @@
 name: document-edit
 title: Dokument bearbeiten
 description: Make edits to a Markdown or plain-text file in the agent's folder — fix a typo, restructure a paragraph, replace a section. The user sees a line-by-line diff before anything is written. Works on `.md`, `.markdown`, `.txt`, `.text` only; use `document-create-docx` or `document-extend` for `.docx`.
-icon: ✏️
+icon: FilePen
 tools:
   - list_folder
   - read_file
   - rewrite_file
+  - ask_user
 hitl:
   default: true
 language: en

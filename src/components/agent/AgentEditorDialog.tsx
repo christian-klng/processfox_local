@@ -1,8 +1,9 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { Folder } from "lucide-react";
+import { Folder, Wrench } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { DynamicIcon } from "@/components/ui/DynamicIcon";
 import {
   Dialog,
   DialogContent,
@@ -65,7 +66,7 @@ export function AgentEditorDialog({
   onSaved,
 }: Props) {
   const [name, setName] = useState("");
-  const [icon, setIcon] = useState("🦊");
+  const [icon, setIcon] = useState("Bot");
   const [folder, setFolder] = useState<string | null>(null);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [selection, setSelection] = useState<ModelSelection>({ kind: "inherit" });
@@ -73,6 +74,7 @@ export function AgentEditorDialog({
   const [installed, setInstalled] = useState<InstalledModel[]>([]);
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([]);
   const [activeSkills, setActiveSkills] = useState<string[]>([]);
+  const [hitlDisabled, setHitlDisabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,13 +90,15 @@ export function AgentEditorDialog({
       setSystemPrompt(agent.systemPrompt);
       setSelection(modelRefToSelection(agent.model));
       setActiveSkills(agent.skills);
+      setHitlDisabled(agent.hitlDisabled);
     } else {
       setName("");
-      setIcon("🦊");
+      setIcon("Bot");
       setFolder(null);
       setSystemPrompt("");
       setSelection({ kind: "inherit" });
       setActiveSkills([]);
+      setHitlDisabled(false);
     }
     setError(null);
   }, [isOpen, mode, agent]);
@@ -122,6 +126,7 @@ export function AgentEditorDialog({
               systemPrompt,
               model,
               skills: activeSkills,
+              hitlDisabled,
             })
           : await agentApi.update(agent!.id, {
               name: name.trim(),
@@ -130,6 +135,7 @@ export function AgentEditorDialog({
               systemPrompt,
               model,
               skills: activeSkills,
+              hitlDisabled,
             });
       onSaved(saved);
       onClose();
@@ -162,30 +168,16 @@ export function AgentEditorDialog({
         </DialogHeader>
 
         <div className="flex flex-col gap-4 py-1">
-          <div className="flex items-end gap-3">
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="agent-icon" className="text-xs">
-                Icon
-              </Label>
-              <Input
-                id="agent-icon"
-                value={icon}
-                onChange={(e) => setIcon(e.target.value)}
-                maxLength={2}
-                className="w-16 text-center text-lg"
-              />
-            </div>
-            <div className="flex flex-1 flex-col gap-1.5">
-              <Label htmlFor="agent-name" className="text-xs">
-                Name
-              </Label>
-              <Input
-                id="agent-name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="z. B. Angebots-Assistent"
-              />
-            </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="agent-name" className="text-xs">
+              Name
+            </Label>
+            <Input
+              id="agent-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="z. B. Angebots-Assistent"
+            />
           </div>
 
           <div className="flex flex-col gap-1.5">
@@ -358,7 +350,11 @@ export function AgentEditorDialog({
                           )
                         }
                       />
-                      <span className="text-sm leading-none">{s.icon ?? "🔧"}</span>
+                      <DynamicIcon
+                        name={s.icon}
+                        fallback={Wrench}
+                        className="h-3.5 w-3.5 text-muted-foreground"
+                      />
                       <span className="text-xs font-medium">{s.title}</span>
                       <span className="ml-auto font-mono text-[10px] text-muted-foreground">
                         {s.name}
@@ -369,6 +365,25 @@ export function AgentEditorDialog({
               </div>
             )}
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border bg-background p-2">
+            <input
+              type="checkbox"
+              checked={hitlDisabled}
+              onChange={(e) => setHitlDisabled(e.target.checked)}
+              className="mt-0.5"
+            />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-medium">
+                Schreiben ohne Rückfrage
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Schreib-Tools laufen sofort durch — der Freigabe-Dialog wird
+                übersprungen. Vorsicht: nur für Agenten verwenden, denen du
+                das eigenständige Arbeiten in „ihrem" Ordner zutraust.
+              </span>
+            </div>
+          </label>
 
           {error && (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">

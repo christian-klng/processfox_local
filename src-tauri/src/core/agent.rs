@@ -33,6 +33,11 @@ pub struct Agent {
     pub skills: Vec<String>,
     #[serde(default)]
     pub skill_settings: std::collections::BTreeMap<String, SkillSetting>,
+    /// Per-agent escape hatch: when true, write tools execute without the
+    /// HITL approve/reject gate. Default false — only flip this for agents
+    /// the user trusts to act unattended.
+    #[serde(default)]
+    pub hitl_disabled: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -52,6 +57,8 @@ pub struct AgentDraft {
     pub model: Option<ModelRef>,
     #[serde(default)]
     pub skills: Vec<String>,
+    #[serde(default)]
+    pub hitl_disabled: bool,
 }
 
 /// Input shape when updating an existing agent. Every field is optional.
@@ -70,6 +77,8 @@ pub struct AgentUpdate {
     pub model: Option<ModelRef>,
     #[serde(default)]
     pub skills: Option<Vec<String>>,
+    #[serde(default)]
+    pub hitl_disabled: Option<bool>,
 }
 
 impl Agent {
@@ -84,6 +93,7 @@ impl Agent {
             model: draft.model,
             skills: draft.skills,
             skill_settings: Default::default(),
+            hitl_disabled: draft.hitl_disabled,
             created_at: now.clone(),
             updated_at: now,
         }
@@ -107,6 +117,9 @@ impl Agent {
         }
         if let Some(v) = update.skills {
             self.skills = v;
+        }
+        if let Some(v) = update.hitl_disabled {
+            self.hitl_disabled = v;
         }
         self.updated_at = Utc::now().to_rfc3339();
     }

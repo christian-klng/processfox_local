@@ -8,6 +8,7 @@ use crate::core::settings::SettingsStore;
 use crate::core::skill::SkillRegistry;
 use crate::core::storage::AppPaths;
 use crate::core::tool::ToolRegistry;
+use crate::core::watcher::FolderWatcher;
 
 #[derive(Debug, Clone)]
 pub struct AppState {
@@ -18,6 +19,7 @@ pub struct AppState {
     pub skills: SkillRegistry,
     chat_runner: Arc<OnceLock<ChatRunner>>,
     download_runner: Arc<OnceLock<DownloadRunner>>,
+    folder_watcher: Arc<OnceLock<FolderWatcher>>,
 }
 
 impl AppState {
@@ -36,7 +38,14 @@ impl AppState {
             skills,
             chat_runner: Arc::new(OnceLock::new()),
             download_runner: Arc::new(OnceLock::new()),
+            folder_watcher: Arc::new(OnceLock::new()),
         }
+    }
+
+    pub fn folder_watcher(&self, app: &tauri::AppHandle) -> FolderWatcher {
+        self.folder_watcher
+            .get_or_init(|| FolderWatcher::new(app.clone()))
+            .clone()
     }
 
     pub fn agent_repo(&self) -> AgentRepo {

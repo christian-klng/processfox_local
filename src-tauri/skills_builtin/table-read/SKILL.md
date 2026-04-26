@@ -2,7 +2,7 @@
 name: table-read
 title: Tabellen lesen
 description: Read XLSX or CSV tables from the agent's folder and answer questions about their contents. Use when the user asks about rows, columns, totals, or specific cells.
-icon: 📊
+icon: FileSpreadsheet
 tools:
   - list_folder
   - read_file

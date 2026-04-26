@@ -207,6 +207,7 @@ function AppShell() {
         streamingReasoning={chat.streamingReasoning}
         pendingTools={chat.pendingTools}
         pendingHitl={chat.pendingHitl}
+        pendingQuestion={chat.pendingQuestion}
         sending={chat.sending}
         chatError={chat.error}
         chatDisabled={chatDisabled}
@@ -223,6 +224,7 @@ function AppShell() {
         onCancelRun={chat.cancel}
         onApproveHitl={chat.approveHitl}
         onRejectHitl={() => chat.rejectHitl()}
+        onRespondToQuestion={chat.respondToQuestion}
         onDismissChatError={chat.clearError}
       />
 

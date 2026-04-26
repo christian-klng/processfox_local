@@ -11,3 +11,4 @@ pub mod skill;
 pub mod storage;
 pub mod tool;
 pub mod types;
+pub mod watcher;

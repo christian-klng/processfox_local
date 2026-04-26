@@ -16,9 +16,9 @@ use crate::core::skill::SkillRegistry;
 use crate::core::storage::AppPaths;
 use crate::core::tool::{
     tools::{
-        AppendToDocxTool, AppendToMdTool, GrepInFilesTool, ListFolderTool, ReadDocxTool,
-        ReadFileTool, ReadPdfTool, ReadXlsxRangeTool, RewriteFileTool, UpdateXlsxCellTool,
-        WriteDocxTool, WriteXlsxTool,
+        AppendToDocxTool, AppendToMdTool, AskUserTool, GrepInFilesTool, ListFolderTool,
+        ReadDocxTool, ReadFileTool, ReadPdfTool, ReadXlsxRangeTool, RewriteFileTool,
+        UpdateXlsxCellTool, WriteDocxTool, WriteXlsxTool,
     },
     ToolRegistry,
 };
@@ -65,6 +65,7 @@ pub fn run() {
             tools.register(Arc::new(RewriteFileTool));
             tools.register(Arc::new(UpdateXlsxCellTool));
             tools.register(Arc::new(WriteXlsxTool));
+            tools.register(Arc::new(AskUserTool));
             tracing::info!(tools = tools.names().len(), "tool registry ready");
 
             let skills = SkillRegistry::load_builtin()?;
@@ -80,6 +81,8 @@ pub fn run() {
             commands::agent::update_agent,
             commands::agent::delete_agent,
             commands::file::list_agent_folder,
+            commands::file::watch_agent_folder,
+            commands::file::unwatch_agent_folder,
             commands::settings::get_settings,
             commands::settings::set_default_provider,
             commands::settings::set_default_model,
@@ -94,6 +97,7 @@ pub fn run() {
             commands::chat::cancel_run,
             commands::chat::approve_hitl,
             commands::chat::reject_hitl,
+            commands::chat::respond_to_question,
             commands::models::list_catalog,
             commands::models::list_installed_models,
             commands::models::get_hardware_info,

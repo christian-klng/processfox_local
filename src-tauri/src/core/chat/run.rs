@@ -71,6 +71,21 @@ pub enum RunEvent {
         hitl_id: String,
         decision: HitlDecision,
     },
+    /// Run is paused waiting for the user to type an answer to a clarifying
+    /// question raised by the `ask_user` tool. The runner resumes once
+    /// `ChatRunner::resolve_question` is called via `respond_to_question`.
+    AskUserRequest {
+        question_id: String,
+        tool_call_id: String,
+        question: String,
+    },
+    /// User has typed an answer to a pending ask_user. The answer is also
+    /// included in the corresponding `ToolCallCompleted` so frontends that
+    /// only listen to the tool channel still see it.
+    AskUserResolved {
+        question_id: String,
+        answer: String,
+    },
     Finish {
         reason: String,
         message: ChatMessage,
@@ -91,6 +106,11 @@ pub struct ChatRunHandle {
 /// commands look the request up by `hitl_id` and resolve it.
 type PendingHitls = Arc<Mutex<HashMap<String, oneshot::Sender<HitlDecision>>>>;
 
+/// Shared map of pending `ask_user` questions. Same shape as PendingHitls but
+/// the payload is a free-form answer string rather than an Approve/Reject
+/// decision.
+type PendingQuestions = Arc<Mutex<HashMap<String, oneshot::Sender<String>>>>;
+
 #[derive(Clone, Debug)]
 pub struct ChatRunner {
     app: AppHandle,
@@ -100,6 +120,7 @@ pub struct ChatRunner {
     skills: SkillRegistry,
     active: Arc<Mutex<HashMap<RunId, ChatRunHandle>>>,
     pending_hitls: PendingHitls,
+    pending_questions: PendingQuestions,
 }
 
 impl ChatRunner {
@@ -118,6 +139,7 @@ impl ChatRunner {
             skills,
             active: Arc::new(Mutex::new(HashMap::new())),
             pending_hitls: Arc::new(Mutex::new(HashMap::new())),
+            pending_questions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -128,6 +150,17 @@ impl ChatRunner {
         let mut guard = self.pending_hitls.lock().await;
         if let Some(tx) = guard.remove(hitl_id) {
             let _ = tx.send(decision);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Resolve a pending ask_user question with the user's typed answer.
+    pub async fn resolve_question(&self, question_id: &str, answer: String) -> bool {
+        let mut guard = self.pending_questions.lock().await;
+        if let Some(tx) = guard.remove(question_id) {
+            let _ = tx.send(answer);
             true
         } else {
             false
@@ -167,6 +200,7 @@ impl ChatRunner {
         let tools = self.tools.clone();
         let skills = self.skills.clone();
         let pending_hitls = self.pending_hitls.clone();
+        let pending_questions = self.pending_questions.clone();
         let agent_id = agent.id.clone();
         let run_id_bg = run_id.clone();
         let assistant_id_bg = assistant_id.clone();
@@ -190,6 +224,7 @@ impl ChatRunner {
                 &tools,
                 &skills,
                 &pending_hitls,
+                &pending_questions,
                 &agent,
                 &model_id,
                 &assistant_id_bg,
@@ -268,6 +303,7 @@ async fn react_loop(
     tools: &ToolRegistry,
     skills: &SkillRegistry,
     pending_hitls: &PendingHitls,
+    pending_questions: &PendingQuestions,
     agent: &Agent,
     model_id: &str,
     final_msg_id: &str,
@@ -350,6 +386,61 @@ async fn react_loop(
             if cancel.is_cancelled() {
                 return Err(CoreError::Cancelled);
             }
+
+            // ask_user is intercepted here — it's not a real tool but a
+            // question/answer round-trip with the user. The runner pauses
+            // until the user types an answer via `respond_to_question`.
+            if call.name == "ask_user" {
+                let question = call
+                    .arguments
+                    .get("question")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let question_id = Uuid::new_v4().to_string();
+                let (tx, rx) = oneshot::channel::<String>();
+                pending_questions
+                    .lock()
+                    .await
+                    .insert(question_id.clone(), tx);
+                let _ = app.emit(
+                    channel,
+                    RunEvent::AskUserRequest {
+                        question_id: question_id.clone(),
+                        tool_call_id: call.id.clone(),
+                        question,
+                    },
+                );
+                let answer = tokio::select! {
+                    res = rx => res.unwrap_or_else(|_| "(keine Antwort)".to_string()),
+                    _ = cancel.cancelled() => {
+                        pending_questions.lock().await.remove(&question_id);
+                        return Err(CoreError::Cancelled);
+                    }
+                };
+                let _ = app.emit(
+                    channel,
+                    RunEvent::AskUserResolved {
+                        question_id: question_id.clone(),
+                        answer: answer.clone(),
+                    },
+                );
+                let _ = app.emit(
+                    channel,
+                    RunEvent::ToolCallCompleted {
+                        id: call.id.clone(),
+                        content: answer.clone(),
+                        is_error: false,
+                    },
+                );
+                results.push(ToolResult {
+                    tool_use_id: call.id.clone(),
+                    content: answer,
+                    is_error: false,
+                });
+                continue;
+            }
+
             let folder = agent_folder.clone().ok_or_else(|| {
                 CoreError::Llm("Agent hat keinen Ordner konfiguriert.".to_string())
             })?;
@@ -359,11 +450,17 @@ async fn react_loop(
                 app: app.clone(),
             };
 
-            // Pre-flight: if the tool wants approval, gate it here.
+            // Pre-flight: if the tool wants approval, gate it here. Skip the
+            // gate entirely if the agent has its HITL toggle off — that's
+            // the per-agent escape hatch for trusted, unattended runs.
             let tool = tools.get(&call.name);
-            let approval = match &tool {
-                Ok(t) => t.requires_approval(&call.arguments, &ctx),
-                Err(_) => None,
+            let approval = if agent.hitl_disabled {
+                None
+            } else {
+                match &tool {
+                    Ok(t) => t.requires_approval(&call.arguments, &ctx),
+                    Err(_) => None,
+                }
             };
             if let Some(preview) = approval {
                 let hitl_id = Uuid::new_v4().to_string();

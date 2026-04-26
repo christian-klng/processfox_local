@@ -1,3 +1,6 @@
+import { Wrench } from "lucide-react";
+
+import { DynamicIcon } from "@/components/ui/DynamicIcon";
 import type { Skill } from "@/types/skill";
 
 type Props = {
@@ -25,7 +28,11 @@ export function SkillIconRow({ activeSkillNames, skills }: Props) {
           title={skill?.title ?? name}
           className="flex items-center gap-1 rounded-sm border border-border bg-muted/50 px-1.5 py-0.5 text-[11px] text-muted-foreground"
         >
-          <span className="text-sm leading-none">{skill?.icon ?? "🔧"}</span>
+          <DynamicIcon
+            name={skill?.icon}
+            fallback={Wrench}
+            className="h-3 w-3"
+          />
           <span>{skill?.title ?? name}</span>
         </span>
       ))}

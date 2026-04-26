@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type NodeApi, type NodeRendererProps } from "react-arborist";
-import { ChevronRight, File, Folder, FolderOpen } from "lucide-react";
+import { ChevronRight, Folder, FolderOpen } from "lucide-react";
 
+import { iconForFile } from "@/lib/fileIcons";
 import { fileApi } from "@/lib/tauri";
 import type { FileEntry } from "@/types/file";
 import { cn } from "@/lib/utils";
@@ -90,6 +91,34 @@ export function FileTree({
     const handler = () => refresh();
     window.addEventListener("focus", handler);
     return () => window.removeEventListener("focus", handler);
+  }, [agentId, hasFolder, refresh]);
+
+  // Live FS watcher: arm a backend notify-watcher on the agent folder and
+  // refresh whenever it pings. Drops the watch when the agent or folder
+  // changes (the next mount installs the new one).
+  useEffect(() => {
+    if (!agentId || !hasFolder) return;
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
+    fileApi
+      .watchAgentFolder(agentId)
+      .then(() =>
+        fileApi.subscribeFsChanged(() => refresh()).then((u) => {
+          if (cancelled) {
+            u();
+          } else {
+            unlisten = u;
+          }
+        }),
+      )
+      .catch((e) => console.warn("watch failed", e));
+
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+      fileApi.unwatchAgentFolder().catch(() => {});
+    };
   }, [agentId, hasFolder, refresh]);
 
   const content = useMemo(() => {
@@ -201,7 +230,10 @@ function Node({
           <Folder className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )
       ) : (
-        <File className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        (() => {
+          const Icon = iconForFile(node.data.name);
+          return <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />;
+        })()
       )}
       <span className="truncate">{node.data.name}</span>
     </div>

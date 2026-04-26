@@ -2,7 +2,7 @@
 name: document-create-docx
 title: Word-Dokument erstellen
 description: Create a new Microsoft Word (.docx) file from a structured text input — e.g. a meeting summary, an offer letter, a one-pager. Existing files are not touched (use `document-extend` or `document-edit` for that). Every write asks the user for confirmation first.
-icon: 📄
+icon: FilePlus
 tools:
   - list_folder
   - read_file

@@ -2,7 +2,7 @@
 name: document-read
 title: Dokumente lesen
 description: Open and summarize a single document — PDF, DOCX, MD, TXT — from the agent's folder. Use when the user asks "what's in this file?" or "summarize document X".
-icon: 📄
+icon: FileText
 tools:
   - list_folder
   - read_file

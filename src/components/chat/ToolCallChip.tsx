@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { AlertTriangle, Check, ChevronRight, Loader2, Wrench } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Loader2 } from "lucide-react";
 
+import { iconForTool } from "@/lib/toolIcons";
 import { cn } from "@/lib/utils";
 
 export type ToolChipStatus = "running" | "done" | "error";
@@ -26,6 +27,7 @@ export function ToolCallChip({ name, status, arguments: args, result }: Props) {
   })();
 
   const canExpand = Boolean(argsText) || Boolean(result);
+  const ToolIcon = iconForTool(name);
 
   return (
     <div
@@ -52,7 +54,7 @@ export function ToolCallChip({ name, status, arguments: args, result }: Props) {
         ) : (
           <AlertTriangle className="h-3 w-3 shrink-0" />
         )}
-        <Wrench className="h-3 w-3 shrink-0 opacity-60" />
+        <ToolIcon className="h-3 w-3 shrink-0 opacity-60" />
         <span className="font-mono">{name}</span>
         {canExpand && (
           <ChevronRight

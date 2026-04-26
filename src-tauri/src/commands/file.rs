@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::core::error::{CommandError, CoreError};
 use crate::core::sandbox::ensure_in_agent_folder;
@@ -75,4 +75,36 @@ pub async fn list_agent_folder(
     });
 
     Ok(entries)
+}
+
+/// Start (or replace) the FS watch on the given agent's folder. Subsequent
+/// changes inside that folder emit a debounced `"fs-changed"` Tauri event.
+#[tauri::command]
+pub async fn watch_agent_folder(
+    agent_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let agent = state.agent_repo().get(&agent_id)?;
+    let folder = agent.folder.ok_or_else(|| {
+        CommandError::new(
+            "agent_has_no_folder",
+            "Für diesen Agenten ist kein Ordner konfiguriert.",
+        )
+    })?;
+    state
+        .folder_watcher(&app)
+        .watch(&folder)
+        .map_err(CommandError::from)?;
+    Ok(())
+}
+
+/// Stop the FS watcher (e.g. when no agent is active).
+#[tauri::command]
+pub async fn unwatch_agent_folder(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    state.folder_watcher(&app).unwatch();
+    Ok(())
 }

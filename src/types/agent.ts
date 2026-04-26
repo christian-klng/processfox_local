@@ -15,6 +15,7 @@ export interface Agent {
   model: ModelRef | null;
   skills: string[];
   skillSettings: Record<string, SkillSetting>;
+  hitlDisabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,6 +27,7 @@ export interface AgentDraft {
   systemPrompt?: string;
   model?: ModelRef;
   skills?: string[];
+  hitlDisabled?: boolean;
 }
 
 export interface AgentUpdate {
@@ -35,4 +37,5 @@ export interface AgentUpdate {
   systemPrompt?: string;
   model?: ModelRef;
   skills?: string[];
+  hitlDisabled?: boolean;
 }

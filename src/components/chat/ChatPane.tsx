@@ -1,13 +1,14 @@
 import { useEffect, useRef } from "react";
 import { AlertCircle, Loader2, Square, X } from "lucide-react";
 
+import { AskUserCard } from "@/components/chat/AskUserCard";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { HitlCard } from "@/components/chat/HitlCard";
 import { ReasoningChip } from "@/components/chat/ReasoningChip";
 import { ToolCallChip } from "@/components/chat/ToolCallChip";
 import { Button } from "@/components/ui/button";
 import type { PendingToolCall } from "@/hooks/useAgentChat";
-import type { ChatMessage, PendingHitl } from "@/types/chat";
+import type { ChatMessage, PendingHitl, PendingQuestion } from "@/types/chat";
 
 type Props = {
   messages: ChatMessage[];
@@ -15,6 +16,7 @@ type Props = {
   streamingReasoning: string | null;
   pendingTools: PendingToolCall[];
   pendingHitl: PendingHitl | null;
+  pendingQuestion: PendingQuestion | null;
   sending: boolean;
   error: string | null;
   disabled?: boolean;
@@ -23,6 +25,7 @@ type Props = {
   onCancel: () => void;
   onApproveHitl: () => void;
   onRejectHitl: () => void;
+  onRespondToQuestion: (answer: string) => void;
   onDismissError: () => void;
   onOpenSettings?: () => void;
 };
@@ -33,6 +36,7 @@ export function ChatPane({
   streamingReasoning,
   pendingTools,
   pendingHitl,
+  pendingQuestion,
   sending,
   error,
   disabled,
@@ -41,6 +45,7 @@ export function ChatPane({
   onCancel,
   onApproveHitl,
   onRejectHitl,
+  onRespondToQuestion,
   onDismissError,
   onOpenSettings,
 }: Props) {
@@ -111,6 +116,13 @@ export function ChatPane({
                 onReject={onRejectHitl}
               />
             )}
+
+            {pendingQuestion && (
+              <AskUserCard
+                question={pendingQuestion}
+                onRespond={onRespondToQuestion}
+              />
+            )}
           </div>
         )}
       </div>
@@ -134,9 +146,11 @@ export function ChatPane({
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             {pendingHitl
               ? "wartet auf Freigabe …"
-              : pendingTools.some((t) => t.status === "running")
-                ? "führt Tool aus …"
-                : "generiert …"}
+              : pendingQuestion
+                ? "wartet auf deine Antwort …"
+                : pendingTools.some((t) => t.status === "running")
+                  ? "führt Tool aus …"
+                  : "generiert …"}
           </div>
           <Button size="sm" variant="outline" onClick={onCancel} className="gap-1.5">
             <Square className="h-3 w-3" />

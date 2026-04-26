@@ -2,7 +2,7 @@
 name: table-create
 title: Tabelle erstellen
 description: Create a new Excel (.xlsx) workbook from a small structured input — e.g. a budget, a contact list, a quick comparison. Existing workbooks are not touched (use `table-update` for that). Every write asks the user for confirmation first.
-icon: 📊
+icon: FilePlus
 tools:
   - list_folder
   - write_xlsx

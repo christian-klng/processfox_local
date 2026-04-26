@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { chatApi } from "@/lib/tauri";
 import type { Agent } from "@/types/agent";
-import type { ChatMessage, PendingHitl } from "@/types/chat";
+import type { ChatMessage, PendingHitl, PendingQuestion } from "@/types/chat";
 import type { Settings } from "@/types/settings";
 
 export type EffectiveModel = {
@@ -57,6 +57,8 @@ export function useAgentChat(
   );
   const [pendingTools, setPendingTools] = useState<PendingToolCall[]>([]);
   const [pendingHitl, setPendingHitl] = useState<PendingHitl | null>(null);
+  const [pendingQuestion, setPendingQuestion] =
+    useState<PendingQuestion | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const streamRef = useRef<StreamState | null>(null);
@@ -72,6 +74,7 @@ export function useAgentChat(
     setStreamingReasoning(null);
     setPendingTools([]);
     setPendingHitl(null);
+    setPendingQuestion(null);
     setSending(false);
   }, []);
 
@@ -195,6 +198,18 @@ export function useAgentChat(
                 prev && prev.hitlId === event.hitlId ? null : prev,
               );
               break;
+            case "askUserRequest":
+              setPendingQuestion({
+                questionId: event.questionId,
+                toolCallId: event.toolCallId,
+                question: event.question,
+              });
+              break;
+            case "askUserResolved":
+              setPendingQuestion((prev) =>
+                prev && prev.questionId === event.questionId ? null : prev,
+              );
+              break;
             case "finish":
               chatApi
                 .listMessages(agent.id)
@@ -254,6 +269,19 @@ export function useAgentChat(
     [pendingHitl],
   );
 
+  const respondToQuestion = useCallback(
+    async (answer: string) => {
+      const id = pendingQuestion?.questionId;
+      if (!id) return;
+      try {
+        await chatApi.respondToQuestion(id, answer);
+      } catch (e) {
+        console.warn("respond failed", e);
+      }
+    },
+    [pendingQuestion],
+  );
+
   useEffect(() => {
     return () => {
       if (unlistenRef.current) unlistenRef.current();
@@ -267,11 +295,13 @@ export function useAgentChat(
     streamingReasoning,
     pendingTools,
     pendingHitl,
+    pendingQuestion,
     error,
     send,
     cancel,
     approveHitl,
     rejectHitl,
+    respondToQuestion,
     clearError: () => setError(null),
   } as const;
 }

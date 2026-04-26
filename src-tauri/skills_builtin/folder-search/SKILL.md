@@ -2,7 +2,7 @@
 name: folder-search
 title: Ordner durchsuchen
 description: Find and read files in the agent's folder. Use when the user asks what's in their folder, what documents mention a topic, or to quote specific passages.
-icon: 🔍
+icon: FolderSearch
 tools:
   - list_folder
   - read_file

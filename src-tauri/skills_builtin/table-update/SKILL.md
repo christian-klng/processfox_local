@@ -2,11 +2,12 @@
 name: table-update
 title: Tabelle ändern
 description: Update single cells in an Excel (.xlsx) workbook in the agent's folder. Useful for fixing typos, recording new figures, or filling in missing values. Every change is shown cell-by-cell with before/after and the user must approve before anything is written.
-icon: 📊
+icon: FilePen
 tools:
   - list_folder
   - read_xlsx_range
   - update_xlsx_cell
+  - ask_user
 hitl:
   default: true
 language: en

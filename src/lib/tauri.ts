@@ -25,6 +25,13 @@ export const agentApi = {
 export const fileApi = {
   listAgentFolder: (agentId: string, subPath?: string) =>
     invoke<FileEntry[]>("list_agent_folder", { agentId, subPath }),
+  watchAgentFolder: (agentId: string) =>
+    invoke<void>("watch_agent_folder", { agentId }),
+  unwatchAgentFolder: () => invoke<void>("unwatch_agent_folder"),
+  /** Subscribe to FS-changed pings emitted by the watcher. The payload
+   *  is empty `()`; callers should use it as a signal to refresh. */
+  subscribeFsChanged: (handler: () => void): Promise<UnlistenFn> =>
+    listen("fs-changed", () => handler()),
 };
 
 export const settingsApi = {
@@ -105,6 +112,8 @@ export const chatApi = {
     invoke<void>("approve_hitl", { hitlId }),
   rejectHitl: (hitlId: string, reason?: string) =>
     invoke<void>("reject_hitl", { hitlId, reason }),
+  respondToQuestion: (questionId: string, answer: string) =>
+    invoke<void>("respond_to_question", { questionId, answer }),
 
   subscribeRun: (
     runId: string,

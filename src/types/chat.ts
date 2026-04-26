@@ -57,6 +57,12 @@ export interface PendingHitl {
   preview: HitlPreview;
 }
 
+export interface PendingQuestion {
+  questionId: string;
+  toolCallId: string;
+  question: string;
+}
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -111,6 +117,17 @@ export type RunEvent =
       type: "hitlResolved";
       hitlId: string;
       decision: HitlDecision;
+    }
+  | {
+      type: "askUserRequest";
+      questionId: string;
+      toolCallId: string;
+      question: string;
+    }
+  | {
+      type: "askUserResolved";
+      questionId: string;
+      answer: string;
     }
   | {
       type: "finish";

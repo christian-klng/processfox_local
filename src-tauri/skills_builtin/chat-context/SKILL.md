@@ -2,7 +2,7 @@
 name: chat-context
 title: Gesprächskontext nutzen
 description: Use earlier turns of this conversation as context. Activate when the user is having a multi-turn discussion or refers back to something said before.
-icon: 💬
+icon: MessagesSquare
 tools: []
 hitl:
   default: false

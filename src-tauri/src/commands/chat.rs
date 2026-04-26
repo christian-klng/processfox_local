@@ -73,3 +73,15 @@ pub async fn reject_hitl(
         .await;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn respond_to_question(
+    question_id: String,
+    answer: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let runner = state.chat_runner(&app);
+    runner.resolve_question(&question_id, answer).await;
+    Ok(())
+}
