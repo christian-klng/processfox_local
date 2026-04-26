@@ -18,7 +18,7 @@ use crate::core::tool::{
     tools::{
         AppendToDocxTool, AppendToMdTool, AskUserTool, GrepInFilesTool, ListFolderTool,
         ReadDocxTool, ReadFileTool, ReadPdfTool, ReadXlsxRangeTool, RewriteFileTool,
-        UpdateXlsxCellTool, WriteDocxTool, WriteXlsxTool,
+        UpdateXlsxCellTool, WriteDocxFromTemplateTool, WriteDocxTool, WriteXlsxTool,
     },
     ToolRegistry,
 };
@@ -66,6 +66,7 @@ pub fn run() {
             tools.register(Arc::new(UpdateXlsxCellTool));
             tools.register(Arc::new(WriteXlsxTool));
             tools.register(Arc::new(AskUserTool));
+            tools.register(Arc::new(WriteDocxFromTemplateTool));
             tracing::info!(tools = tools.names().len(), "tool registry ready");
 
             let skills = SkillRegistry::load_builtin()?;

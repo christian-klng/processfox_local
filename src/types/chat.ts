@@ -44,6 +44,14 @@ export type HitlPreview =
       sheet: string;
       rows: string[][];
       createsFile: boolean;
+    }
+  | {
+      kind: "writeDocxFromTemplate";
+      templatePath: string;
+      outputPath: string;
+      replacements: { key: string; value: string }[];
+      templatePlaceholders: string[];
+      createsFile: boolean;
     };
 
 export type HitlDecision =

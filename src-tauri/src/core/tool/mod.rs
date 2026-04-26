@@ -122,6 +122,25 @@ pub enum HitlPreview {
         rows: Vec<Vec<String>>,
         creates_file: bool,
     },
+    /// Generate a new .docx by filling `{{placeholder}}` slots in an existing
+    /// template. The preview shows the substitution table plus any
+    /// placeholders the template defines that the LLM did not provide.
+    WriteDocxFromTemplate {
+        template_path: String,
+        output_path: String,
+        replacements: Vec<TemplateReplacement>,
+        /// Placeholders the tool found in the template's document.xml. UI
+        /// can highlight any that don't appear in `replacements`.
+        template_placeholders: Vec<String>,
+        creates_file: bool,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateReplacement {
+    pub key: String,
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

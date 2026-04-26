@@ -3,6 +3,7 @@ import {
   FileEdit,
   FilePen,
   FilePlus,
+  FileStack,
   FileText,
   Sheet as SheetIcon,
   X,
@@ -32,14 +33,7 @@ export function HitlCard({ hitl, busy, onApprove, onReject }: Props) {
         </span>
       </div>
 
-      <div className="flex flex-col gap-1">
-        <div className="text-[11px] uppercase tracking-wide opacity-70">
-          Datei
-        </div>
-        <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
-          {preview.path}
-        </div>
-      </div>
+      <PathSummary preview={preview} />
 
       <PreviewBody preview={preview} />
 
@@ -58,6 +52,41 @@ export function HitlCard({ hitl, busy, onApprove, onReject }: Props) {
           <Check className="h-3.5 w-3.5" />
           Freigeben
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function PathSummary({ preview }: { preview: HitlPreview }) {
+  if (preview.kind === "writeDocxFromTemplate") {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1">
+          <div className="text-[11px] uppercase tracking-wide opacity-70">
+            Vorlage
+          </div>
+          <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
+            {preview.templatePath}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1">
+          <div className="text-[11px] uppercase tracking-wide opacity-70">
+            Ausgabe
+          </div>
+          <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
+            {preview.outputPath}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="text-[11px] uppercase tracking-wide opacity-70">
+        Datei
+      </div>
+      <div className="rounded-sm border border-amber-500/30 bg-background/40 px-2 py-1 font-mono text-xs">
+        {preview.path}
       </div>
     </div>
   );
@@ -95,6 +124,10 @@ function headingFor(preview: HitlPreview): {
       return preview.createsFile
         ? { Icon: FilePlus, label: "Excel-Tabelle erstellen" }
         : { Icon: SheetIcon, label: "Excel-Tabelle überschreiben" };
+    case "writeDocxFromTemplate":
+      return preview.createsFile
+        ? { Icon: FileStack, label: "Word-Dokument aus Vorlage erstellen" }
+        : { Icon: FileStack, label: "Word-Dokument aus Vorlage überschreiben" };
   }
 }
 
@@ -165,6 +198,14 @@ function PreviewBody({ preview }: { preview: HitlPreview }) {
         <WriteXlsxSection
           sheet={preview.sheet}
           rows={preview.rows}
+          createsFile={preview.createsFile}
+        />
+      );
+    case "writeDocxFromTemplate":
+      return (
+        <TemplateSection
+          replacements={preview.replacements}
+          templatePlaceholders={preview.templatePlaceholders}
           createsFile={preview.createsFile}
         />
       );
@@ -248,6 +289,65 @@ function WriteXlsxSection({
           ⚠ Diese Datei existiert bereits und wird komplett ersetzt — vorhandene
           Sheets, Formatierung und Formeln gehen verloren. Für gezielte Änderungen
           benutze den Skill „Tabelle ändern".
+        </p>
+      )}
+    </>
+  );
+}
+
+function TemplateSection({
+  replacements,
+  templatePlaceholders,
+  createsFile,
+}: {
+  replacements: { key: string; value: string }[];
+  templatePlaceholders: string[];
+  createsFile: boolean;
+}) {
+  const providedKeys = new Set(replacements.map((r) => r.key));
+  const missing = templatePlaceholders.filter((k) => !providedKeys.has(k));
+  return (
+    <>
+      <div className="flex flex-col gap-1">
+        <div className="text-[11px] uppercase tracking-wide opacity-70">
+          Platzhalter füllen — {replacements.length}{" "}
+          {replacements.length === 1 ? "Eintrag" : "Einträge"}
+        </div>
+        <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-amber-500/30 text-left opacity-70">
+                <th className="px-2 py-1 font-medium">Schlüssel</th>
+                <th className="px-2 py-1 font-medium">Wert</th>
+              </tr>
+            </thead>
+            <tbody>
+              {replacements.map((r) => (
+                <tr
+                  key={r.key}
+                  className="border-b border-amber-500/20 last:border-b-0"
+                >
+                  <td className="px-2 py-1 align-top">{`{{${r.key}}}`}</td>
+                  <td className="px-2 py-1 align-top whitespace-pre-wrap">
+                    {r.value || <span className="opacity-50">(leer)</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {missing.length > 0 && (
+        <p className="text-[11px] opacity-80">
+          ⚠ Die Vorlage enthält noch ungefüllte Platzhalter:{" "}
+          {missing.map((k) => `{{${k}}}`).join(", ")}. Wenn diese im
+          Ergebnis-Dokument als Klartext erscheinen sollen, ist das ok — sonst
+          ablehnen und die Werte ergänzen.
+        </p>
+      )}
+      {!createsFile && (
+        <p className="text-[11px] opacity-80">
+          ⚠ Die Ausgabedatei existiert bereits und wird ersetzt.
         </p>
       )}
     </>
