@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/resizable";
 import type { PendingToolCall } from "@/hooks/useAgentChat";
 import type { Agent } from "@/types/agent";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, PendingHitl } from "@/types/chat";
 import type { Skill } from "@/types/skill";
 
 type Props = {
@@ -21,6 +21,7 @@ type Props = {
   streamingText: string | null;
   streamingReasoning: string | null;
   pendingTools: PendingToolCall[];
+  pendingHitl: PendingHitl | null;
   sending: boolean;
   chatError: string | null;
   chatDisabled: boolean;
@@ -35,6 +36,8 @@ type Props = {
   onClosePreview: () => void;
   onSendMessage: (text: string) => void;
   onCancelRun: () => void;
+  onApproveHitl: () => void;
+  onRejectHitl: () => void;
   onDismissChatError: () => void;
 };
 
@@ -46,6 +49,7 @@ export function Main({
   streamingText,
   streamingReasoning,
   pendingTools,
+  pendingHitl,
   sending,
   chatError,
   chatDisabled,
@@ -60,6 +64,8 @@ export function Main({
   onClosePreview,
   onSendMessage,
   onCancelRun,
+  onApproveHitl,
+  onRejectHitl,
   onDismissChatError,
 }: Props) {
   const showPreview = selectedFile !== null;
@@ -113,12 +119,15 @@ export function Main({
           streamingText={streamingText}
           streamingReasoning={streamingReasoning}
           pendingTools={pendingTools}
+          pendingHitl={pendingHitl}
           sending={sending}
           error={chatError}
           disabled={chatDisabled}
           disabledReason={chatDisabledReason}
           onSend={onSendMessage}
           onCancel={onCancelRun}
+          onApproveHitl={onApproveHitl}
+          onRejectHitl={onRejectHitl}
           onDismissError={onDismissChatError}
           onOpenSettings={onOpenSettings}
         />

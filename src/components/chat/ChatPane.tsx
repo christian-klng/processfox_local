@@ -2,23 +2,27 @@ import { useEffect, useRef } from "react";
 import { AlertCircle, Loader2, Square, X } from "lucide-react";
 
 import { ChatInput } from "@/components/chat/ChatInput";
+import { HitlCard } from "@/components/chat/HitlCard";
 import { ReasoningChip } from "@/components/chat/ReasoningChip";
 import { ToolCallChip } from "@/components/chat/ToolCallChip";
 import { Button } from "@/components/ui/button";
 import type { PendingToolCall } from "@/hooks/useAgentChat";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, PendingHitl } from "@/types/chat";
 
 type Props = {
   messages: ChatMessage[];
   streamingText: string | null;
   streamingReasoning: string | null;
   pendingTools: PendingToolCall[];
+  pendingHitl: PendingHitl | null;
   sending: boolean;
   error: string | null;
   disabled?: boolean;
   disabledReason?: string;
   onSend: (text: string) => void;
   onCancel: () => void;
+  onApproveHitl: () => void;
+  onRejectHitl: () => void;
   onDismissError: () => void;
   onOpenSettings?: () => void;
 };
@@ -28,12 +32,15 @@ export function ChatPane({
   streamingText,
   streamingReasoning,
   pendingTools,
+  pendingHitl,
   sending,
   error,
   disabled,
   disabledReason,
   onSend,
   onCancel,
+  onApproveHitl,
+  onRejectHitl,
   onDismissError,
   onOpenSettings,
 }: Props) {
@@ -96,6 +103,14 @@ export function ChatPane({
             {streamingText !== null && streamingText.length > 0 && (
               <StreamingBubble text={streamingText} />
             )}
+
+            {pendingHitl && (
+              <HitlCard
+                hitl={pendingHitl}
+                onApprove={onApproveHitl}
+                onReject={onRejectHitl}
+              />
+            )}
           </div>
         )}
       </div>
@@ -117,9 +132,11 @@ export function ChatPane({
         <div className="flex items-center justify-between gap-2 border-t border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
           <div className="flex items-center gap-2">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            {pendingTools.some((t) => t.status === "running")
-              ? "führt Tool aus …"
-              : "generiert …"}
+            {pendingHitl
+              ? "wartet auf Freigabe …"
+              : pendingTools.some((t) => t.status === "running")
+                ? "führt Tool aus …"
+                : "generiert …"}
           </div>
           <Button size="sm" variant="outline" onClick={onCancel} className="gap-1.5">
             <Square className="h-3 w-3" />
@@ -203,14 +220,18 @@ function MessageBlock({
         <div className="flex flex-col gap-1">
           {message.toolCalls!.map((tc) => {
             const res = toolResults[tc.id];
-            const status = res ? (res.isError ? "error" : "done") : "done";
+            const status = res
+              ? res.isError
+                ? "error"
+                : "done"
+              : "error";
             return (
               <ToolCallChip
                 key={tc.id}
                 name={tc.name}
                 status={status}
                 arguments={tc.arguments}
-                result={res?.content}
+                result={res?.content ?? "Lauf wurde abgebrochen, bevor das Tool beendet hat."}
               />
             );
           })}

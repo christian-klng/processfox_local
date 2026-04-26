@@ -1,13 +1,21 @@
+pub mod append_to_docx;
+pub mod append_to_md;
 pub mod grep_in_files;
 pub mod list_folder;
 pub mod read_docx;
 pub mod read_file;
 pub mod read_pdf;
 pub mod read_xlsx_range;
+pub mod rewrite_file;
+pub mod write_docx;
 
+pub use append_to_docx::AppendToDocxTool;
+pub use append_to_md::AppendToMdTool;
 pub use grep_in_files::GrepInFilesTool;
 pub use list_folder::ListFolderTool;
 pub use read_docx::ReadDocxTool;
 pub use read_file::ReadFileTool;
 pub use read_pdf::ReadPdfTool;
 pub use read_xlsx_range::ReadXlsxRangeTool;
+pub use rewrite_file::RewriteFileTool;
+pub use write_docx::WriteDocxTool;

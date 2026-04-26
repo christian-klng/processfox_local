@@ -101,6 +101,11 @@ export const chatApi = {
 
   cancelRun: (runId: string) => invoke<void>("cancel_run", { runId }),
 
+  approveHitl: (hitlId: string) =>
+    invoke<void>("approve_hitl", { hitlId }),
+  rejectHitl: (hitlId: string, reason?: string) =>
+    invoke<void>("reject_hitl", { hitlId, reason }),
+
   subscribeRun: (
     runId: string,
     handler: (event: RunEvent) => void,

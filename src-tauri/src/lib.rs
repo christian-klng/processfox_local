@@ -16,7 +16,8 @@ use crate::core::skill::SkillRegistry;
 use crate::core::storage::AppPaths;
 use crate::core::tool::{
     tools::{
-        GrepInFilesTool, ListFolderTool, ReadDocxTool, ReadFileTool, ReadPdfTool, ReadXlsxRangeTool,
+        AppendToDocxTool, AppendToMdTool, GrepInFilesTool, ListFolderTool, ReadDocxTool,
+        ReadFileTool, ReadPdfTool, ReadXlsxRangeTool, RewriteFileTool, WriteDocxTool,
     },
     ToolRegistry,
 };
@@ -57,6 +58,10 @@ pub fn run() {
             tools.register(Arc::new(ReadPdfTool));
             tools.register(Arc::new(ReadDocxTool));
             tools.register(Arc::new(ReadXlsxRangeTool));
+            tools.register(Arc::new(AppendToMdTool));
+            tools.register(Arc::new(WriteDocxTool));
+            tools.register(Arc::new(AppendToDocxTool));
+            tools.register(Arc::new(RewriteFileTool));
             tracing::info!(tools = tools.names().len(), "tool registry ready");
 
             let skills = SkillRegistry::load_builtin()?;
@@ -84,6 +89,8 @@ pub fn run() {
             commands::chat::list_messages,
             commands::chat::send_message,
             commands::chat::cancel_run,
+            commands::chat::approve_hitl,
+            commands::chat::reject_hitl,
             commands::models::list_catalog,
             commands::models::list_installed_models,
             commands::models::get_hardware_info,

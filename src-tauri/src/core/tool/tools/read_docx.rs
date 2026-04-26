@@ -94,7 +94,7 @@ impl Tool for ReadDocxTool {
 /// Open a .docx (zip), find `word/document.xml`, and concatenate `<w:t>`
 /// run-text contents. Paragraph boundaries (`<w:p>`) emit a newline; line
 /// breaks (`<w:br>`) emit a soft newline.
-fn extract_docx_text(path: &std::path::Path) -> CoreResult<String> {
+pub(super) fn extract_docx_text(path: &std::path::Path) -> CoreResult<String> {
     let file = std::fs::File::open(path)?;
     let mut zip = zip::ZipArchive::new(file)
         .map_err(|e| CoreError::Llm(format!("DOCX kein gültiges ZIP: {e}")))?;

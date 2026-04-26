@@ -46,3 +46,30 @@ pub async fn cancel_run(
     runner.cancel(&run_id).await;
     Ok(())
 }
+
+#[tauri::command]
+pub async fn approve_hitl(
+    hitl_id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let runner = state.chat_runner(&app);
+    runner
+        .resolve_hitl(&hitl_id, crate::core::tool::HitlDecision::Approve)
+        .await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn reject_hitl(
+    hitl_id: String,
+    reason: Option<String>,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<(), CommandError> {
+    let runner = state.chat_runner(&app);
+    runner
+        .resolve_hitl(&hitl_id, crate::core::tool::HitlDecision::Reject { reason })
+        .await;
+    Ok(())
+}

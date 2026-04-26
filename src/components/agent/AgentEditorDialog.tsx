@@ -338,13 +338,14 @@ export function AgentEditorDialog({
                 Keine Skills verfügbar.
               </div>
             ) : (
-              <div className="flex flex-col gap-1 rounded-md border border-border bg-background p-2">
+              <div className="flex flex-col gap-0.5 rounded-md border border-border bg-background p-2">
                 {availableSkills.map((s) => {
                   const checked = activeSkills.includes(s.name);
                   return (
                     <label
                       key={s.name}
-                      className="flex cursor-pointer items-start gap-2 rounded-sm px-1.5 py-1 hover:bg-accent/40"
+                      title={s.description}
+                      className="flex cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1 hover:bg-accent/40"
                     >
                       <input
                         type="checkbox"
@@ -356,20 +357,12 @@ export function AgentEditorDialog({
                               : prev.filter((n) => n !== s.name),
                           )
                         }
-                        className="mt-0.5"
                       />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 text-xs font-medium">
-                          <span>{s.icon ?? "🔧"}</span>
-                          <span>{s.title}</span>
-                          <span className="font-mono text-[10px] text-muted-foreground">
-                            {s.name}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 text-[11px] text-muted-foreground">
-                          {s.description}
-                        </div>
-                      </div>
+                      <span className="text-sm leading-none">{s.icon ?? "🔧"}</span>
+                      <span className="text-xs font-medium">{s.title}</span>
+                      <span className="ml-auto font-mono text-[10px] text-muted-foreground">
+                        {s.name}
+                      </span>
                     </label>
                   );
                 })}

@@ -1,5 +1,49 @@
 export type ChatMessageRole = "user" | "assistant" | "system" | "tool";
 
+export type HitlPreview =
+  | {
+      kind: "appendToFile";
+      path: string;
+      content: string;
+      createsFile: boolean;
+      /** Last few lines of the existing file, so the reviewer can spot a
+       *  format mismatch before approving. Absent for new files. */
+      existingTail?: string;
+    }
+  | {
+      kind: "writeDocx";
+      path: string;
+      blockCount: number;
+      previewText: string;
+      createsFile: boolean;
+    }
+  | {
+      kind: "appendToDocx";
+      path: string;
+      blockCount: number;
+      previewText: string;
+      createsFile: boolean;
+      existingTail?: string;
+    }
+  | {
+      kind: "rewriteFile";
+      path: string;
+      before: string;
+      after: string;
+      createsFile: boolean;
+    };
+
+export type HitlDecision =
+  | { kind: "approve" }
+  | { kind: "reject"; reason?: string };
+
+export interface PendingHitl {
+  hitlId: string;
+  toolCallId: string;
+  toolName: string;
+  preview: HitlPreview;
+}
+
 export interface ToolCall {
   id: string;
   name: string;
@@ -42,6 +86,18 @@ export type RunEvent =
       id: string;
       content: string;
       isError: boolean;
+    }
+  | {
+      type: "hitlRequest";
+      hitlId: string;
+      toolCallId: string;
+      toolName: string;
+      preview: HitlPreview;
+    }
+  | {
+      type: "hitlResolved";
+      hitlId: string;
+      decision: HitlDecision;
     }
   | {
       type: "finish";

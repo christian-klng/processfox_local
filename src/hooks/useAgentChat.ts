@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { chatApi } from "@/lib/tauri";
 import type { Agent } from "@/types/agent";
-import type { ChatMessage } from "@/types/chat";
+import type { ChatMessage, PendingHitl } from "@/types/chat";
 import type { Settings } from "@/types/settings";
 
 export type EffectiveModel = {
@@ -56,6 +56,7 @@ export function useAgentChat(
     null,
   );
   const [pendingTools, setPendingTools] = useState<PendingToolCall[]>([]);
+  const [pendingHitl, setPendingHitl] = useState<PendingHitl | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const streamRef = useRef<StreamState | null>(null);
@@ -70,6 +71,7 @@ export function useAgentChat(
     setStreamingText(null);
     setStreamingReasoning(null);
     setPendingTools([]);
+    setPendingHitl(null);
     setSending(false);
   }, []);
 
@@ -180,6 +182,19 @@ export function useAgentChat(
                 ),
               );
               break;
+            case "hitlRequest":
+              setPendingHitl({
+                hitlId: event.hitlId,
+                toolCallId: event.toolCallId,
+                toolName: event.toolName,
+                preview: event.preview,
+              });
+              break;
+            case "hitlResolved":
+              setPendingHitl((prev) =>
+                prev && prev.hitlId === event.hitlId ? null : prev,
+              );
+              break;
             case "finish":
               chatApi
                 .listMessages(agent.id)
@@ -216,6 +231,29 @@ export function useAgentChat(
     }
   }, []);
 
+  const approveHitl = useCallback(async () => {
+    const id = pendingHitl?.hitlId;
+    if (!id) return;
+    try {
+      await chatApi.approveHitl(id);
+    } catch (e) {
+      console.warn("approve failed", e);
+    }
+  }, [pendingHitl]);
+
+  const rejectHitl = useCallback(
+    async (reason?: string) => {
+      const id = pendingHitl?.hitlId;
+      if (!id) return;
+      try {
+        await chatApi.rejectHitl(id, reason);
+      } catch (e) {
+        console.warn("reject failed", e);
+      }
+    },
+    [pendingHitl],
+  );
+
   useEffect(() => {
     return () => {
       if (unlistenRef.current) unlistenRef.current();
@@ -228,9 +266,12 @@ export function useAgentChat(
     streamingText,
     streamingReasoning,
     pendingTools,
+    pendingHitl,
     error,
     send,
     cancel,
+    approveHitl,
+    rejectHitl,
     clearError: () => setError(null),
   } as const;
 }

@@ -15,7 +15,8 @@ use crate::core::llm::{
     ToolResult,
 };
 use crate::core::skill::SkillRegistry;
-use crate::core::tool::{ToolContext, ToolRegistry, ToolSchema};
+use crate::core::tool::{HitlDecision, HitlPreview, ToolContext, ToolRegistry, ToolSchema};
+use tokio::sync::oneshot;
 
 pub type RunId = String;
 
@@ -32,7 +33,11 @@ pub struct RunStarted {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum RunEvent {
     Delta {
         text: String,
@@ -50,6 +55,22 @@ pub enum RunEvent {
         content: String,
         is_error: bool,
     },
+    /// Run is paused waiting for the user to approve or reject a write
+    /// operation. The runner resumes once `ChatRunner::resolve_hitl` is
+    /// called via the `approve_hitl` / `reject_hitl` Tauri command.
+    HitlRequest {
+        hitl_id: String,
+        tool_call_id: String,
+        tool_name: String,
+        preview: HitlPreview,
+    },
+    /// User has decided on a pending HITL request. Sent for transparency —
+    /// the actual outcome shows up as a regular `ToolCallCompleted` once
+    /// the tool finished (or never, if rejected).
+    HitlResolved {
+        hitl_id: String,
+        decision: HitlDecision,
+    },
     Finish {
         reason: String,
         message: ChatMessage,
@@ -65,6 +86,11 @@ pub struct ChatRunHandle {
     pub cancel: CancellationToken,
 }
 
+/// Shared map of pending HITL requests. The chat-runner inserts a one-shot
+/// sender when it pauses for approval; the `approve_hitl` / `reject_hitl`
+/// commands look the request up by `hitl_id` and resolve it.
+type PendingHitls = Arc<Mutex<HashMap<String, oneshot::Sender<HitlDecision>>>>;
+
 #[derive(Clone, Debug)]
 pub struct ChatRunner {
     app: AppHandle,
@@ -73,6 +99,7 @@ pub struct ChatRunner {
     tools: ToolRegistry,
     skills: SkillRegistry,
     active: Arc<Mutex<HashMap<RunId, ChatRunHandle>>>,
+    pending_hitls: PendingHitls,
 }
 
 impl ChatRunner {
@@ -90,6 +117,20 @@ impl ChatRunner {
             tools,
             skills,
             active: Arc::new(Mutex::new(HashMap::new())),
+            pending_hitls: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Resolve a pending HITL request with the user's decision. Looks the
+    /// request up by `hitl_id`; if it's still pending, sends the decision
+    /// to the chat-runner task that's waiting on it.
+    pub async fn resolve_hitl(&self, hitl_id: &str, decision: HitlDecision) -> bool {
+        let mut guard = self.pending_hitls.lock().await;
+        if let Some(tx) = guard.remove(hitl_id) {
+            let _ = tx.send(decision);
+            true
+        } else {
+            false
         }
     }
 
@@ -125,6 +166,7 @@ impl ChatRunner {
         let repo = self.repo.clone();
         let tools = self.tools.clone();
         let skills = self.skills.clone();
+        let pending_hitls = self.pending_hitls.clone();
         let agent_id = agent.id.clone();
         let run_id_bg = run_id.clone();
         let assistant_id_bg = assistant_id.clone();
@@ -147,6 +189,7 @@ impl ChatRunner {
                 &repo,
                 &tools,
                 &skills,
+                &pending_hitls,
                 &agent,
                 &model_id,
                 &assistant_id_bg,
@@ -224,6 +267,7 @@ async fn react_loop(
     repo: &ChatRepo,
     tools: &ToolRegistry,
     skills: &SkillRegistry,
+    pending_hitls: &PendingHitls,
     agent: &Agent,
     model_id: &str,
     final_msg_id: &str,
@@ -294,9 +338,13 @@ async fn react_loop(
             tool_results: Vec::new(),
             reasoning: reasoning.clone(),
         };
-        let _ = repo.append(&agent.id, &assistant_persist);
+        // Persist below as a pair with the tool results — writing here
+        // would leave orphaned tool_calls in history if the run is cancelled
+        // or errors out before the tools finish.
 
-        // Execute each tool and collect results.
+        // Execute each tool and collect results. If a tool requires
+        // human-in-the-loop approval, pause here, surface the preview to
+        // the UI, and only run after the user clicks Freigeben.
         let mut results = Vec::with_capacity(tool_calls.len());
         for call in &tool_calls {
             if cancel.is_cancelled() {
@@ -310,7 +358,71 @@ async fn react_loop(
                 agent_folder: folder,
                 app: app.clone(),
             };
-            let (content, is_error) = match tools.get(&call.name) {
+
+            // Pre-flight: if the tool wants approval, gate it here.
+            let tool = tools.get(&call.name);
+            let approval = match &tool {
+                Ok(t) => t.requires_approval(&call.arguments, &ctx),
+                Err(_) => None,
+            };
+            if let Some(preview) = approval {
+                let hitl_id = Uuid::new_v4().to_string();
+                let (tx, rx) = oneshot::channel::<HitlDecision>();
+                {
+                    let mut guard = pending_hitls.lock().await;
+                    guard.insert(hitl_id.clone(), tx);
+                }
+                let _ = app.emit(
+                    channel,
+                    RunEvent::HitlRequest {
+                        hitl_id: hitl_id.clone(),
+                        tool_call_id: call.id.clone(),
+                        tool_name: call.name.clone(),
+                        preview,
+                    },
+                );
+
+                let decision = tokio::select! {
+                    res = rx => res.unwrap_or(HitlDecision::Reject {
+                        reason: Some("Freigabe abgebrochen".into()),
+                    }),
+                    _ = cancel.cancelled() => {
+                        // Drop the pending entry so it doesn't leak.
+                        pending_hitls.lock().await.remove(&hitl_id);
+                        return Err(CoreError::Cancelled);
+                    }
+                };
+
+                let _ = app.emit(
+                    channel,
+                    RunEvent::HitlResolved {
+                        hitl_id: hitl_id.clone(),
+                        decision: decision.clone(),
+                    },
+                );
+
+                if let HitlDecision::Reject { reason } = &decision {
+                    let msg = reason
+                        .clone()
+                        .unwrap_or_else(|| "User rejected the change".to_string());
+                    let _ = app.emit(
+                        channel,
+                        RunEvent::ToolCallCompleted {
+                            id: call.id.clone(),
+                            content: msg.clone(),
+                            is_error: true,
+                        },
+                    );
+                    results.push(ToolResult {
+                        tool_use_id: call.id.clone(),
+                        content: format!("REJECTED_BY_USER: {msg}"),
+                        is_error: true,
+                    });
+                    continue;
+                }
+            }
+
+            let (content, is_error) = match tool {
                 Ok(tool) => match tool.execute(call.arguments.clone(), &ctx).await {
                     Ok(out) => (out.content, false),
                     Err(e) => (format!("tool error: {e}"), true),
@@ -349,6 +461,7 @@ async fn react_loop(
             tool_results: results,
             reasoning: None,
         };
+        let _ = repo.append(&agent.id, &assistant_persist);
         let _ = repo.append(&agent.id, &tool_persist);
 
         if finish_reason == FinishReason::Stop {
@@ -444,6 +557,14 @@ async fn run_single_call(
 
 fn compose_system_prompt(agent: &Agent, skills: &SkillRegistry) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
+    // Anchor temporal references like "today" / "yesterday" — the model
+    // otherwise only knows its training cutoff and can't resolve them.
+    let now = chrono::Local::now();
+    parts.push(format!(
+        "Today is {} ({}).",
+        now.format("%Y-%m-%d"),
+        now.format("%A"),
+    ));
     if !agent.system_prompt.trim().is_empty() {
         parts.push(agent.system_prompt.trim().to_string());
     }
