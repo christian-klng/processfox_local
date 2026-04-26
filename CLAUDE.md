@@ -141,6 +141,7 @@ processfox/
 - Trait `LlmProvider` mit async `generate(messages, tools, params) -> Stream<Event>`.
 - Implementierungen: `LocalGgufProvider`, `AnthropicProvider`, `OpenAiProvider`, `OpenRouterProvider`.
 - Einheitliches Event-Format: `TextDelta`, `ToolCall`, `Finish { reason }`.
+- **Lokales Modell-Lifecycle:** `LocalGgufProvider` hält ein Modell zwischen Generations geladen, entlädt es aber nach 10 min Idle automatisch (Watcher in `ensure_idle_watcher`). Wer den RAM-Bedarf debuggt oder zusätzliche Trigger zum Entladen einbaut (z. B. beim Wechsel auf Cloud-Provider), arbeitet hier — nicht den Watcher umgehen, sondern ergänzen.
 
 ### Tool-Registry
 

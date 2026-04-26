@@ -107,6 +107,8 @@ enum LlmEvent {
 }
 ```
 
+**Lifecycle des lokalen Modells:** `LocalGgufProvider` hält genau ein Modell zur Zeit im RAM. Es bleibt zwischen Generations geladen, wird aber nach **10 Minuten ohne Aktivität** automatisch entladen — der RAM (mehrere GB plus KV-Cache) wird also nicht dauerhaft belegt, wenn die Nutzerin auf einen Cloud-Provider wechselt oder den Chat ruhen lässt. Ein Modellwechsel (anderer `filename`) triggert einen sofortigen Unload-und-Reload. Der nächste Prompt nach einem Idle-Unload kostet einmalig den Reload (~1–3 s SSD-Read bei einem 2-GB-Modell). Watcher-Implementierung in `core/llm/local_gguf.rs` (`ensure_idle_watcher`).
+
 ### `tools::*`
 Einzelne Tool-Implementierungen:
 - `list_folder` — Listet Dateien/Ordner (rekursiv, mit Filter).

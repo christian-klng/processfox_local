@@ -17,7 +17,8 @@ use crate::core::storage::AppPaths;
 use crate::core::tool::{
     tools::{
         AppendToDocxTool, AppendToMdTool, GrepInFilesTool, ListFolderTool, ReadDocxTool,
-        ReadFileTool, ReadPdfTool, ReadXlsxRangeTool, RewriteFileTool, WriteDocxTool,
+        ReadFileTool, ReadPdfTool, ReadXlsxRangeTool, RewriteFileTool, UpdateXlsxCellTool,
+        WriteDocxTool, WriteXlsxTool,
     },
     ToolRegistry,
 };
@@ -62,6 +63,8 @@ pub fn run() {
             tools.register(Arc::new(WriteDocxTool));
             tools.register(Arc::new(AppendToDocxTool));
             tools.register(Arc::new(RewriteFileTool));
+            tools.register(Arc::new(UpdateXlsxCellTool));
+            tools.register(Arc::new(WriteXlsxTool));
             tracing::info!(tools = tools.names().len(), "tool registry ready");
 
             let skills = SkillRegistry::load_builtin()?;

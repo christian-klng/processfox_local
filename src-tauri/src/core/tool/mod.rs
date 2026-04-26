@@ -105,8 +105,31 @@ pub enum HitlPreview {
         after: String,
         creates_file: bool,
     },
-    // Future variants in later Phase-4 etappes:
-    //   UpdateCells  { path, sheet, changes: Vec<CellChange> }
+    /// Update one or more cells in an Excel workbook. The frontend shows a
+    /// small table cell-by-cell so the user can verify each change before
+    /// approving.
+    UpdateCells {
+        path: String,
+        sheet: String,
+        changes: Vec<CellChange>,
+    },
+    /// Create a new Excel workbook (or overwrite an existing one) from a
+    /// rectangular `rows` payload. The frontend shows the rows as a small
+    /// table; on overwrite it warns that existing data will be lost.
+    WriteXlsx {
+        path: String,
+        sheet: String,
+        rows: Vec<Vec<String>>,
+        creates_file: bool,
+    },
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CellChange {
+    pub cell: String,
+    pub before: String,
+    pub after: String,
 }
 
 /// Decision returned for a pending HITL request.

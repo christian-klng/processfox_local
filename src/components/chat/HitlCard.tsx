@@ -1,4 +1,12 @@
-import { Check, FileEdit, FilePen, FilePlus, FileText, X } from "lucide-react";
+import {
+  Check,
+  FileEdit,
+  FilePen,
+  FilePlus,
+  FileText,
+  Sheet as SheetIcon,
+  X,
+} from "lucide-react";
 import { diffLines } from "diff";
 
 import { Button } from "@/components/ui/button";
@@ -76,6 +84,17 @@ function headingFor(preview: HitlPreview): {
       return preview.createsFile
         ? { Icon: FilePlus, label: "Neue Datei schreiben" }
         : { Icon: FileEdit, label: "Datei komplett ersetzen" };
+    case "updateCells": {
+      const n = preview.changes.length;
+      return {
+        Icon: SheetIcon,
+        label: `${n} ${n === 1 ? "Zelle" : "Zellen"} aktualisieren`,
+      };
+    }
+    case "writeXlsx":
+      return preview.createsFile
+        ? { Icon: FilePlus, label: "Excel-Tabelle erstellen" }
+        : { Icon: SheetIcon, label: "Excel-Tabelle überschreiben" };
   }
 }
 
@@ -134,6 +153,21 @@ function PreviewBody({ preview }: { preview: HitlPreview }) {
       );
     case "rewriteFile":
       return <DiffSection before={preview.before} after={preview.after} />;
+    case "updateCells":
+      return (
+        <CellChangesSection
+          sheet={preview.sheet}
+          changes={preview.changes}
+        />
+      );
+    case "writeXlsx":
+      return (
+        <WriteXlsxSection
+          sheet={preview.sheet}
+          rows={preview.rows}
+          createsFile={preview.createsFile}
+        />
+      );
   }
 }
 
@@ -158,6 +192,107 @@ function Section({
       >
         {children}
       </pre>
+    </div>
+  );
+}
+
+function WriteXlsxSection({
+  sheet,
+  rows,
+  createsFile,
+}: {
+  sheet: string;
+  rows: string[][];
+  createsFile: boolean;
+}) {
+  const MAX_ROWS = 10;
+  const visible = rows.slice(0, MAX_ROWS);
+  const hidden = rows.length - visible.length;
+  const colCount = rows.reduce((m, r) => Math.max(m, r.length), 0);
+  return (
+    <>
+      <div className="flex flex-col gap-1">
+        <div className="text-[11px] uppercase tracking-wide opacity-70">
+          Sheet „{sheet}" — {rows.length}{" "}
+          {rows.length === 1 ? "Zeile" : "Zeilen"} × {colCount}{" "}
+          {colCount === 1 ? "Spalte" : "Spalten"}
+        </div>
+        <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+          <table className="w-full">
+            <tbody>
+              {visible.map((row, i) => (
+                <tr
+                  key={i}
+                  className={`border-b border-amber-500/20 last:border-b-0 ${
+                    i === 0 ? "font-medium" : ""
+                  }`}
+                >
+                  {Array.from({ length: colCount }).map((_, j) => (
+                    <td key={j} className="border-r border-amber-500/10 px-2 py-0.5 last:border-r-0">
+                      {row[j] ?? ""}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {hidden > 0 && (
+          <div className="text-[11px] opacity-70">
+            … +{hidden} weitere {hidden === 1 ? "Zeile" : "Zeilen"} (nicht angezeigt)
+          </div>
+        )}
+      </div>
+      {!createsFile && (
+        <p className="text-[11px] opacity-80">
+          ⚠ Diese Datei existiert bereits und wird komplett ersetzt — vorhandene
+          Sheets, Formatierung und Formeln gehen verloren. Für gezielte Änderungen
+          benutze den Skill „Tabelle ändern".
+        </p>
+      )}
+    </>
+  );
+}
+
+function CellChangesSection({
+  sheet,
+  changes,
+}: {
+  sheet: string;
+  changes: { cell: string; before: string; after: string }[];
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="text-[11px] uppercase tracking-wide opacity-70">
+        Sheet „{sheet}" — Änderungen
+      </div>
+      <div className="overflow-auto rounded-sm border border-amber-500/30 bg-background/60 font-mono text-[11px]">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-amber-500/30 text-left opacity-70">
+              <th className="px-2 py-1 font-medium">Zelle</th>
+              <th className="px-2 py-1 font-medium">Vorher</th>
+              <th className="px-2 py-1 font-medium">Nachher</th>
+            </tr>
+          </thead>
+          <tbody>
+            {changes.map((c, i) => (
+              <tr
+                key={`${c.cell}-${i}`}
+                className="border-b border-amber-500/20 last:border-b-0"
+              >
+                <td className="px-2 py-1 font-medium">{c.cell}</td>
+                <td className="px-2 py-1 align-top text-rose-700 line-through opacity-80 dark:text-rose-300">
+                  {c.before || <span className="opacity-50">(leer)</span>}
+                </td>
+                <td className="px-2 py-1 align-top text-emerald-700 dark:text-emerald-300">
+                  {c.after || <span className="opacity-50">(leer)</span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

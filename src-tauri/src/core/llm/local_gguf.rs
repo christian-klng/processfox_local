@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -29,6 +31,8 @@ pub const PROVIDER_ID: &str = "local";
 
 const DEFAULT_CTX: u32 = 4096;
 const N_GPU_LAYERS_ALL: u32 = 1000;
+const IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const IDLE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Process-wide llama backend. `LlamaBackend::init()` must only be called once
 /// for the lifetime of the process; we lazily initialize it the first time a
@@ -58,9 +62,16 @@ impl std::fmt::Debug for Loaded {
 }
 
 #[derive(Debug)]
+struct LoadedSlot {
+    loaded: Loaded,
+    last_used: Instant,
+}
+
+#[derive(Debug)]
 pub struct LocalGgufProvider {
     models_dir: PathBuf,
-    loaded: Arc<Mutex<Option<Loaded>>>,
+    loaded: Arc<Mutex<Option<LoadedSlot>>>,
+    watcher_started: AtomicBool,
 }
 
 impl LocalGgufProvider {
@@ -68,6 +79,7 @@ impl LocalGgufProvider {
         Self {
             models_dir,
             loaded: Arc::new(Mutex::new(None)),
+            watcher_started: AtomicBool::new(false),
         }
     }
 
@@ -75,18 +87,54 @@ impl LocalGgufProvider {
         *self.loaded.lock().await = None;
     }
 
+    /// Spawns the idle-unload watcher on first use. Held models eat several GB
+    /// of RAM, so we drop them after `IDLE_TIMEOUT` of no `ensure_loaded`
+    /// activity. Lazy spawn guarantees we're inside a tokio runtime.
+    fn ensure_idle_watcher(&self) {
+        if self
+            .watcher_started
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+        let loaded = Arc::clone(&self.loaded);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(IDLE_CHECK_INTERVAL).await;
+                let mut guard = loaded.lock().await;
+                let should_drop = guard
+                    .as_ref()
+                    .map(|s| s.last_used.elapsed() >= IDLE_TIMEOUT)
+                    .unwrap_or(false);
+                if should_drop {
+                    if let Some(slot) = guard.as_ref() {
+                        tracing::info!(
+                            filename = slot.loaded.filename,
+                            "unloading idle local GGUF model"
+                        );
+                    }
+                    *guard = None;
+                }
+            }
+        });
+    }
+
     /// Get the requested model, loading it if it's not already resident.
     /// Switching to a different `filename` triggers an unload of the
-    /// previous model first.
+    /// previous model first. Touches `last_used` on every call so the idle
+    /// watcher only drops models that have actually gone quiet.
     async fn ensure_loaded(&self, filename: &str) -> CoreResult<Loaded> {
+        self.ensure_idle_watcher();
         {
-            let guard = self.loaded.lock().await;
-            if let Some(current) = guard.as_ref() {
-                if current.filename == filename {
+            let mut guard = self.loaded.lock().await;
+            if let Some(current) = guard.as_mut() {
+                if current.loaded.filename == filename {
+                    current.last_used = Instant::now();
                     return Ok(Loaded {
-                        filename: current.filename.clone(),
-                        model: Arc::clone(&current.model),
-                        template: current.template.clone(),
+                        filename: current.loaded.filename.clone(),
+                        model: Arc::clone(&current.loaded.model),
+                        template: current.loaded.template.clone(),
                     });
                 }
             }
@@ -127,10 +175,13 @@ impl LocalGgufProvider {
         .map_err(|e| CoreError::Llm(format!("Load-Task abgebrochen: {e}")))??;
 
         let mut guard = self.loaded.lock().await;
-        *guard = Some(Loaded {
-            filename: loaded.filename.clone(),
-            model: Arc::clone(&loaded.model),
-            template: loaded.template.clone(),
+        *guard = Some(LoadedSlot {
+            loaded: Loaded {
+                filename: loaded.filename.clone(),
+                model: Arc::clone(&loaded.model),
+                template: loaded.template.clone(),
+            },
+            last_used: Instant::now(),
         });
         Ok(loaded)
     }

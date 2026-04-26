@@ -68,6 +68,7 @@ calamine = "0.26"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.36"
 docx-rs = "0.4"
+umya-spreadsheet = "2"
 
 # Local GGUF runtime via llama.cpp. We pick `llama-cpp-2` because it stays
 # very close to llama.cpp upstream (gets new architectures fast — including

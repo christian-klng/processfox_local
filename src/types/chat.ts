@@ -31,6 +31,19 @@ export type HitlPreview =
       before: string;
       after: string;
       createsFile: boolean;
+    }
+  | {
+      kind: "updateCells";
+      path: string;
+      sheet: string;
+      changes: { cell: string; before: string; after: string }[];
+    }
+  | {
+      kind: "writeXlsx";
+      path: string;
+      sheet: string;
+      rows: string[][];
+      createsFile: boolean;
     };
 
 export type HitlDecision =

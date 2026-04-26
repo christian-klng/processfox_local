@@ -7,7 +7,9 @@ pub mod read_file;
 pub mod read_pdf;
 pub mod read_xlsx_range;
 pub mod rewrite_file;
+pub mod update_xlsx_cell;
 pub mod write_docx;
+pub mod write_xlsx;
 
 pub use append_to_docx::AppendToDocxTool;
 pub use append_to_md::AppendToMdTool;
@@ -18,4 +20,6 @@ pub use read_file::ReadFileTool;
 pub use read_pdf::ReadPdfTool;
 pub use read_xlsx_range::ReadXlsxRangeTool;
 pub use rewrite_file::RewriteFileTool;
+pub use update_xlsx_cell::UpdateXlsxCellTool;
 pub use write_docx::WriteDocxTool;
+pub use write_xlsx::WriteXlsxTool;
